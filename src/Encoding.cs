@@ -131,7 +131,9 @@ namespace Turnkey
                 buffer[i] = Convert.ToByte(hexString.Substring(i * 2, 2), 16);
             }
 
-            if (!length.HasValue)
+            // Upstream uses `if (!length)`, which treats `0` as falsy/omitted.
+            // Match that exactly so the wire-level behavior is identical.
+            if (!length.HasValue || length.Value == 0)
             {
                 return buffer;
             }
@@ -152,6 +154,13 @@ namespace Turnkey
         /// Converts a hex string to an ASCII string.
         /// Upstream: <c>hex.ts hexToAscii</c>.
         /// </summary>
+        /// <remarks>
+        /// Upstream JS uses <c>parseInt(s.substr(i, 2), 16)</c> for each pair.
+        /// JS <c>String.prototype.substr(i, 2)</c> can return 1 char on the final
+        /// odd index, and <c>parseInt</c> can return <c>NaN</c> for unparseable
+        /// pairs; <c>String.fromCharCode(NaN)</c> emits <c>U+0000</c>. This port
+        /// preserves both behaviors so wire bytes match upstream for any input.
+        /// </remarks>
         public static string HexToAscii(string hexString)
         {
             if (hexString == null)
@@ -160,11 +169,48 @@ namespace Turnkey
             }
 
             var sb = new StringBuilder(hexString.Length / 2);
-            for (int i = 0; i + 1 < hexString.Length; i += 2)
+            for (int i = 0; i < hexString.Length; i += 2)
             {
-                sb.Append((char)Convert.ToInt32(hexString.Substring(i, 2), 16));
+                // substr(i, 2): may yield 1 char on the trailing odd index.
+                int take = Math.Min(2, hexString.Length - i);
+                string pair = hexString.Substring(i, take);
+
+                // JS parseInt(s, 16):
+                //   - skips leading whitespace
+                //   - parses as many leading [0-9A-Fa-f] characters as possible
+                //   - returns NaN if no characters parse
+                int parsed = JsParseIntBase16(pair);
+                sb.Append((char)parsed);
             }
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// JS-compatible <c>parseInt(s, 16)</c>: parses the leading hex prefix of
+        /// <paramref name="s"/>. Returns 0 for inputs that JS would map to <c>NaN</c>
+        /// (no hex digits parseable) so that <c>String.fromCharCode(NaN)</c>
+        /// behavior is matched (<c>NaN → U+0000</c>).
+        /// </summary>
+        private static int JsParseIntBase16(string s)
+        {
+            if (string.IsNullOrEmpty(s))
+            {
+                return 0;
+            }
+            int value = 0;
+            int parsedDigits = 0;
+            foreach (char c in s)
+            {
+                int digit;
+                if (c >= '0' && c <= '9') digit = c - '0';
+                else if (c >= 'a' && c <= 'f') digit = 10 + (c - 'a');
+                else if (c >= 'A' && c <= 'F') digit = 10 + (c - 'A');
+                else break;
+                value = value * 16 + digit;
+                parsedDigits++;
+            }
+            // JS parseInt returns NaN when no digits parsed; String.fromCharCode(NaN) = 0
+            return parsedDigits == 0 ? 0 : value;
         }
 
         /// <summary>
@@ -315,19 +361,75 @@ namespace Turnkey
         /// Decodes a base64url-encoded string into a plain string by first
         /// restoring base64 padding and then base64-decoding into a byte buffer.
         /// Each output byte is then reinterpreted as a code point.
-        /// Upstream: <c>base64.ts decodeBase64urlToString</c>.
+        /// Upstream: <c>base64.ts decodeBase64urlToString</c> + <c>atob</c>.
         /// </summary>
+        /// <remarks>
+        /// Upstream <c>atob</c> silently strips any character not in
+        /// <c>[A-Za-z0-9+/=]</c> before decoding, and throws only when the
+        /// remaining length mod 4 is 1. This port reproduces that lenient
+        /// behavior so callers get the same string upstream JS would return.
+        /// </remarks>
         public static string DecodeBase64UrlToString(string input)
         {
-            string b64 = Base64UrlToBase64(input);
-            byte[] bytes = Convert.FromBase64String(b64);
-
-            // Upstream atob returns a string where each char's code point is the
-            // raw byte (0..255). Match that by reinterpreting bytes as chars.
-            var sb = new StringBuilder(bytes.Length);
-            for (int i = 0; i < bytes.Length; i++)
+            if (input == null)
             {
-                sb.Append((char)bytes[i]);
+                throw new ArgumentNullException(nameof(input));
+            }
+
+            string b64 = Base64UrlToBase64(input);
+
+            // Reproduce upstream atob: strip invalid characters first.
+            var filtered = new StringBuilder(b64.Length);
+            foreach (char c in b64)
+            {
+                if ((c >= 'A' && c <= 'Z')
+                    || (c >= 'a' && c <= 'z')
+                    || (c >= '0' && c <= '9')
+                    || c == '+' || c == '/' || c == '=')
+                {
+                    filtered.Append(c);
+                }
+            }
+            string sanitized = filtered.ToString();
+
+            // Upstream atob explicitly throws when (length % 4) == 1.
+            if (sanitized.Length % 4 == 1)
+            {
+                throw new ArgumentException(
+                    "InvalidCharacterError: The string to be decoded is not correctly encoded.");
+            }
+
+            // Upstream atob then walks the string and shifts in 6-bit groups,
+            // emitting full 8-bit bytes. Reproduce that bit-shifting decoder
+            // explicitly because it is more permissive than Convert.FromBase64String
+            // (it tolerates missing or partial padding the same way upstream does).
+            const string keyStr =
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+            var sb = new StringBuilder();
+            int buffer = 0;
+            int bits = 0;
+            for (int i = 0; i < sanitized.Length; i++)
+            {
+                char ch = sanitized[i];
+                int index = keyStr.IndexOf(ch);
+                if (index < 0 || index > 64)
+                {
+                    continue;
+                }
+                if (ch == '=')
+                {
+                    bits = 0;
+                }
+                else
+                {
+                    buffer = (buffer << 6) | index;
+                    bits += 6;
+                }
+                while (bits >= 8)
+                {
+                    bits -= 8;
+                    sb.Append((char)((buffer >> bits) & 0xff));
+                }
             }
             return sb.ToString();
         }
