@@ -186,21 +186,52 @@ namespace Turnkey
         }
 
         /// <summary>
-        /// JS-compatible <c>parseInt(s, 16)</c>: parses the leading hex prefix of
-        /// <paramref name="s"/>. Returns 0 for inputs that JS would map to <c>NaN</c>
-        /// (no hex digits parseable) so that <c>String.fromCharCode(NaN)</c>
-        /// behavior is matched (<c>NaN → U+0000</c>).
+        /// JS-compatible <c>parseInt(s, 16)</c>: skips leading whitespace, parses
+        /// an optional sign, then parses the leading hex digits. Returns 0 for
+        /// inputs that JS would map to <c>NaN</c> (no parseable hex digits) so
+        /// that <c>String.fromCharCode(NaN)</c> behavior is preserved
+        /// (<c>NaN → U+0000</c>).
         /// </summary>
+        /// <remarks>
+        /// JS whitespace per the spec includes the regular ASCII whitespace
+        /// characters and a handful of Unicode whitespace classes. The set
+        /// recognized here matches the characters JS treats as
+        /// <c>StrWhiteSpaceChar</c> for the purposes of <c>parseInt</c>:
+        /// <c>U+0009..U+000D</c>, <c>U+0020</c>, <c>U+00A0</c>, <c>U+1680</c>,
+        /// <c>U+2000..U+200A</c>, <c>U+2028</c>, <c>U+2029</c>, <c>U+202F</c>,
+        /// <c>U+205F</c>, <c>U+3000</c>, <c>U+FEFF</c>.
+        /// The sign is preserved per JS semantics; for HexToAscii output the
+        /// downstream <c>(char)</c> cast on a negative value wraps modulo 0x10000,
+        /// matching <c>String.fromCharCode</c>.
+        /// </remarks>
         private static int JsParseIntBase16(string s)
         {
             if (string.IsNullOrEmpty(s))
             {
                 return 0;
             }
+            int i = 0;
+            // Skip leading whitespace (JS StrWhiteSpaceChar).
+            while (i < s.Length && IsJsWhitespace(s[i]))
+            {
+                i++;
+            }
+            // Optional sign.
+            int sign = 1;
+            if (i < s.Length && (s[i] == '+' || s[i] == '-'))
+            {
+                if (s[i] == '-')
+                {
+                    sign = -1;
+                }
+                i++;
+            }
+            // Parse hex run.
             int value = 0;
             int parsedDigits = 0;
-            foreach (char c in s)
+            while (i < s.Length)
             {
+                char c = s[i];
                 int digit;
                 if (c >= '0' && c <= '9') digit = c - '0';
                 else if (c >= 'a' && c <= 'f') digit = 10 + (c - 'a');
@@ -208,9 +239,47 @@ namespace Turnkey
                 else break;
                 value = value * 16 + digit;
                 parsedDigits++;
+                i++;
             }
-            // JS parseInt returns NaN when no digits parsed; String.fromCharCode(NaN) = 0
-            return parsedDigits == 0 ? 0 : value;
+            // JS parseInt returns NaN when no digits parsed; String.fromCharCode(NaN) = 0.
+            return parsedDigits == 0 ? 0 : sign * value;
+        }
+
+        private static bool IsJsWhitespace(char c)
+        {
+            // JS StrWhiteSpaceChar per ECMA-262 14.0:
+            //   https://262.ecma-international.org/14.0/#prod-StrWhiteSpaceChar
+            switch (c)
+            {
+                case '\u0009': // TAB
+                case '\u000A': // LF
+                case '\u000B': // VT
+                case '\u000C': // FF
+                case '\u000D': // CR
+                case '\u0020': // SP
+                case '\u00A0': // NBSP
+                case '\u1680':
+                case '\u2000':
+                case '\u2001':
+                case '\u2002':
+                case '\u2003':
+                case '\u2004':
+                case '\u2005':
+                case '\u2006':
+                case '\u2007':
+                case '\u2008':
+                case '\u2009':
+                case '\u200A':
+                case '\u2028': // LS
+                case '\u2029': // PS
+                case '\u202F': // NNBSP
+                case '\u205F': // MMSP
+                case '\u3000': // IDEOGRAPHIC SPACE
+                case '\uFEFF': // BOM / ZWNBSP
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         /// <summary>
