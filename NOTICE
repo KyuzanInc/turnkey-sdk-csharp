@@ -1,0 +1,19 @@
+KyuzanInc.Turnkey.Sdk (turnkey-sdk-csharp)
+Copyright (c) 2026 Kyuzan Inc.
+
+This product includes logic ported from the following Turnkey, Inc. open-source
+packages, used solely for interoperability with the Turnkey API:
+
+    @turnkey/crypto           version 2.8.8
+    @turnkey/http             version 3.16.0
+    @turnkey/api-key-stamper  version 0.5.0
+    @turnkey/encoding         version 0.6.0
+
+The Turnkey TypeScript packages are distributed under the Apache License 2.0
+(https://github.com/tkhq/sdk/blob/main/LICENSE).
+
+This package is NOT affiliated with, endorsed by, or maintained by Turnkey, Inc.
+It is an unofficial / community-maintained port produced by Kyuzan Inc. and
+provided solely so .NET applications can interact with the Turnkey API.
+
+For the authoritative Turnkey SDK in TypeScript, see https://github.com/tkhq/sdk.

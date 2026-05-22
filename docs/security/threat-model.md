@@ -1,0 +1,63 @@
+# Threat model — turnkey-sdk-csharp
+
+**Scope (in)**: key handling in memory, ECDSA signing path, crypto primitives
+surface, JSON serialization for wire payloads, test-secret handling.
+
+**Scope (out)**: persistent storage, on-disk key storage, SecureStorage
+implementations, OS-level keychain integration. Those belong to
+`peak-sdk-csharp` / `peak-sdk-csharp-unity` (separate packages).
+
+This document is the initial v0.1.0-alpha.0 draft. It will be tightened during
+the implementation rounds.
+
+## Assets
+
+| Asset | Description | Confidentiality | Integrity | Availability |
+|---|---|---|---|---|
+| API key pair (private) | P-256 ECDSA private key held by the caller, passed to `ApiKeyStamper` | High | High | n/a |
+| Session JWT | issued by Turnkey, decoded but not re-signed by this SDK | Medium | High | n/a |
+| Credential bundle | HPKE-encrypted bundle exported by Turnkey, opened with the target private key | High | High | n/a |
+| Target private key (HPKE session) | ephemeral P-256 private key the caller produces with `GenerateP256KeyPair`, used as HPKE recipient | High | High | n/a |
+| Signed request bytes | canonical JSON body + ECDSA stamp over `SHA-256(body)` | n/a | High (wire-format must match Turnkey expectation) | n/a |
+
+## Trust boundaries
+
+```
+Caller code ──► turnkey-sdk-csharp ──► HTTPS Turnkey API
+            (passes secrets in)    (signed request bytes out)
+```
+
+- **Caller → SDK**: the caller holds and supplies all secrets. The SDK does
+  not persist anything. The SDK never writes secrets to disk, never logs
+  raw key material, never throws an exception that includes raw key bytes.
+- **SDK → network**: the SDK produces request bytes; the caller is expected
+  to send them over HTTPS. The SDK does not own the transport.
+- **SDK → CI / test logs**: tests must use de-identified fixtures; live
+  Turnkey credentials never appear in commit history or CI logs.
+
+## Threats and mitigations
+
+| ID | Threat | Mitigation |
+|---|---|---|
+| T-1 | Signing path produces a payload that differs by a single byte from what Turnkey expects (canonical JSON drift) | Golden fixtures generated from pinned Node packages; byte-compared in tests. |
+| T-2 | ECDSA signature is not low-S, gets rejected | DER + low-S explicit; round-trip vs Node-produced signature in tests. |
+| T-3 | HPKE shared-secret derivation off by one constant or label, garbles bundle decrypt | RFC 9180 §A.3 vectors + Turnkey-pinned sample bundle round-trip. |
+| T-4 | HKDF Extract / Expand off-by-one or wrong info ordering | RFC 5869 A.1-A.7 vectors. |
+| T-5 | Caller passes a leading-zero P-256 scalar; BigInteger drops the leading zero, corrupts signature | leading-zero unit tests; explicit pad-to-32 helper used everywhere. |
+| T-6 | AES-GCM tag/nonce/AAD layout drift vs noble | exercised by HPKE §A.3 + Turnkey bundle round-trip. |
+| T-7 | JSON serialization picks up unexpected property order, breaks Turnkey-side `SHA-256(body)` | source-generated JSON only via `TurnkeyJsonContext`; golden fixtures byte-compared. |
+| T-8 | Reflection-based serialization path falls back at runtime under trimming, breaks signing | `JsonSerializerIsReflectionEnabledByDefault=false` not yet wired; covered by AOT smoke. |
+| T-9 | A future BouncyCastle bump silently changes ECDSA / AES-GCM semantics | exact pin via `[2.5.0]`; `packages.lock.json` committed. |
+| T-10 | Test fixtures contain real org credentials | fixture provenance README; PR-time scan for credential-shaped strings. |
+| T-11 | CI logs include signed payloads | secrets via env, no `echo` of payload, fixtures de-identified. |
+| T-12 | E2E live test against Turnkey leaks the test-org credentials | E2E gated behind env-var presence; not run by default; CI scrubs logs. |
+
+## Things this SDK does NOT do
+
+- Does not store anything to disk.
+- Does not implement `ISecureStorage`, Keychain, KeyStore, DPAPI, or any OS
+  keystore wrapper.
+- Does not provide retry / backoff / circuit breakers; that is caller scope.
+- Does not handle WebAuthn / passkey stamping (out of v0.1.0 scope).
+- Does not handle Google OAuth, OTP, or any higher-level identity flow.
+  Those belong to `peak-sdk-csharp` or peak-server.
