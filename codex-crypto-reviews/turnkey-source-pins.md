@@ -14,7 +14,7 @@ GitHub SHAs are secondary metadata.
 | src/Crypto.cs              | turnkey-crypto-2.8.8                    | @turnkey/crypto            | 2.8.8   | `75115706fccc29c664f9f918d9a0c2c1798eb03f261cb5b0c186c75663cf79d3` |
 | src/ApiKeyStamper.cs       | turnkey-api-key-stamper-0.5.0           | @turnkey/api-key-stamper   | 0.5.0   | `962a2d22c7c40240f05be98533769b37ab7dad7dbb5abec762c41007233d02bd` |
 | src/Http.cs                | turnkey-http-3.16.0                     | @turnkey/http              | 3.16.0  | `d849f2156633f63062c52067785df1ce33eac0659044df932862c5d6de9dbdaf` |
-| src/TurnkeyJsonContext.cs  | (no single upstream; covers DTOs from api-key-stamper + http) | n/a | n/a | n/a |
+| src/TurnkeyJsonContext.cs  | turnkey-crypto-2.8.8                    | (no single upstream; covers DTOs from crypto + api-key-stamper + http) | n/a | n/a |
 
 Each upstream snapshot directory contains:
 
