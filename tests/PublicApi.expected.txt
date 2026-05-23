@@ -1,0 +1,324 @@
+namespace Turnkey
+{
+    public class ApiKeyStamper
+    {
+        public const string SignatureScheme = "SIGNATURE_SCHEME_TK_API_P256";
+        public const string StampHeaderName = "X-Stamp";
+        public ApiKeyStamper(string apiPublicKey, string apiPrivateKey) { }
+        public string SignWithApiKey(string content) { }
+        public Turnkey.ApiKeyStamper.StampResult Stamp(string payload) { }
+        public class StampResult
+        {
+            public StampResult() { }
+            public string StampHeaderName { get; set; }
+            public string StampHeaderValue { get; set; }
+        }
+        public class TurnkeyStamp
+        {
+            public TurnkeyStamp() { }
+            [System.Text.Json.Serialization.JsonPropertyName("publicKey")]
+            public string PublicKey { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("scheme")]
+            public string Scheme { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("signature")]
+            public string Signature { get; set; }
+        }
+    }
+    public static class Crypto
+    {
+        public static byte[] BuildAdditionalAssociatedData(byte[] senderPubBuf, byte[] receiverPubBuf) { }
+        public static byte[] CompressRawPublicKey(byte[] rawPublicKey) { }
+        public static string DecryptCredentialBundle(string encryptedCredentialBundle, string embeddedKey) { }
+        public static string DecryptExportBundle(Turnkey.Crypto.DecryptExportBundleParams parameters) { }
+        public static string EncryptPrivateKeyToBundle(Turnkey.Crypto.EncryptPrivateKeyToBundleParams parameters) { }
+        public static string FormatHpkeBuf(byte[] encryptedBuf) { }
+        public static Turnkey.Crypto.KeyPair GenerateP256KeyPair() { }
+        public static byte[] GetPublicKey(byte[] privateKey, bool isCompressed = true) { }
+        public static byte[] GetPublicKey(string privateKeyHex, bool isCompressed = true) { }
+        public static byte[] HpkeDecrypt(Turnkey.Crypto.HpkeDecryptParams parameters) { }
+        public static byte[] HpkeEncrypt(Turnkey.Crypto.HpkeEncryptParams parameters) { }
+        public static byte[] UncompressRawPublicKey(byte[] rawPublicKey, Turnkey.Crypto.Curve curve = 0) { }
+        public static bool VerifySessionJwtSignature(string jwt, string? dangerouslyOverrideNotarizerPublicKey = null) { }
+        public static class Constants
+        {
+            public const string PRODUCTION_NOTARIZER_SIGN_PUBLIC_KEY = "04d498aa87ac3bf982ac2b5dd9604d0074905cfbda5d62727c5a237b895e6749205e9f7cd566909c4" +
+                "387f6ca25c308445c60884b788560b785f4a96ac33702a469";
+            public const string PRODUCTION_SIGNER_SIGN_PUBLIC_KEY = "04cf288fe433cc4e1aa0ce1632feac4ea26bf2f5a09dcfe5a42c398e06898710330f0572882f4dbdf" +
+                "0f5304b8fc8703acd69adca9a4bbf7f5d00d20a5e364b2569";
+            public const int UNCOMPRESSED_PUB_KEY_LENGTH_BYTES = 65;
+            public static readonly byte[] AES_KEY_INFO;
+            public static readonly byte[] HPKE_VERSION;
+            public static readonly byte[] IV_INFO;
+            public static readonly byte[] LABEL_EAE_PRK;
+            public static readonly byte[] LABEL_SECRET;
+            public static readonly byte[] LABEL_SHARED_SECRET;
+            public static readonly byte[] SUITE_ID_1;
+            public static readonly byte[] SUITE_ID_2;
+        }
+        public enum Curve
+        {
+            P256 = 0,
+            Secp256k1 = 1,
+        }
+        public class DecryptExportBundleParams
+        {
+            public DecryptExportBundleParams() { }
+            public string? DangerouslyOverrideSignerPublicKey { get; set; }
+            public string? EmbeddedKey { get; set; }
+            public string? ExportBundle { get; set; }
+            public string? KeyFormat { get; set; }
+            public string? OrganizationId { get; set; }
+            public bool ReturnMnemonic { get; set; }
+        }
+        public class EncryptPrivateKeyToBundleParams
+        {
+            public EncryptPrivateKeyToBundleParams() { }
+            public string? DangerouslyOverrideSignerPublicKey { get; set; }
+            public string? ImportBundle { get; set; }
+            public string? KeyFormat { get; set; }
+            public string? OrganizationId { get; set; }
+            public string? PrivateKey { get; set; }
+            public string? UserId { get; set; }
+        }
+        public static class Hkdf
+        {
+            public static byte[] Expand(byte[] prk, byte[] info, int length) { }
+            public static byte[] Extract(byte[] salt, byte[] ikm) { }
+        }
+        public class HpkeBundlePayload
+        {
+            public HpkeBundlePayload() { }
+            [System.Text.Json.Serialization.JsonPropertyName("ciphertext")]
+            public string Ciphertext { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("encappedPublic")]
+            public string EncappedPublic { get; set; }
+        }
+        public class HpkeDecryptParams
+        {
+            public HpkeDecryptParams() { }
+            public byte[]? CiphertextBuf { get; set; }
+            public byte[]? EncappedKeyBuf { get; set; }
+            public string? ReceiverPriv { get; set; }
+        }
+        public class HpkeEncryptParams
+        {
+            public HpkeEncryptParams() { }
+            public byte[]? PlainTextBuf { get; set; }
+            public byte[]? TargetKeyBuf { get; set; }
+        }
+        public class KeyPair
+        {
+            public KeyPair() { }
+            public string PrivateKey { get; set; }
+            public string PublicKey { get; set; }
+            public string PublicKeyUncompressed { get; set; }
+        }
+        public static class Math
+        {
+            public static Org.BouncyCastle.Math.BigInteger ModSqrt(Org.BouncyCastle.Math.BigInteger x, Org.BouncyCastle.Math.BigInteger p) { }
+        }
+    }
+    public static class CryptoConstants
+    {
+        public const int COMPRESSED_PUBLIC_KEY_SIZE = 33;
+        public const string CURVE_NAME = "secp256r1";
+        public const string P256_A_OFFSET = "3";
+        public const string P256_B = "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b";
+        public const string P256_P = "115792089210356248762697446949407573530086143415290314195533631308867097853951";
+    }
+    public static class Encoding
+    {
+        public static byte[] Base58CheckDecode(string encoded) { }
+        public static string Base58CheckEncode(byte[] payload) { }
+        public static byte[] Base58Decode(string encoded) { }
+        public static string Base58Encode(byte[] data) { }
+        public static string Base64StringToBase64UrlEncodedString(string input) { }
+        public static string Base64UrlToBase64(string input) { }
+        public static byte[] ConcatUint8Arrays(params byte[][] arrays) { }
+        public static string DecodeBase64UrlToString(string input) { }
+        public static string HexStringToBase64Url(string input, int? length = default) { }
+        public static string HexToAscii(string hexString) { }
+        public static byte[] NormalizePadding(byte[] byteArray, int targetLength) { }
+        public static byte[] PointEncode(byte[] raw) { }
+        public static string StringToBase64UrlString(string input) { }
+        public static byte[] Uint8ArrayFromHexString(string hexString, int? length = default) { }
+        public static string Uint8ArrayToHexString(byte[] input) { }
+        public static string Uint8ArrayToString(byte[] bytes) { }
+        public static class Constants
+        {
+            public const string BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+            public const int DEFAULT_JWK_MEMBER_BYTE_LENGTH = 32;
+        }
+    }
+    public class Http
+    {
+        public const string DefaultBaseUrl = "https://api.turnkey.com";
+        public Turnkey.Http.SignedRequest StampExportPrivateKey(Turnkey.Http.ExportPrivateKeyRequestBody body) { }
+        public Turnkey.Http.SignedRequest StampExportWalletAccount(Turnkey.Http.ExportWalletAccountRequestBody body) { }
+        public Turnkey.Http.SignedRequest StampGetWhoami(string organizationId) { }
+        public Turnkey.Http.SignedRequest StampImportPrivateKey(Turnkey.Http.ImportPrivateKeyRequestBody body) { }
+        public Turnkey.Http.SignedRequest StampInitImportPrivateKey(Turnkey.Http.InitImportPrivateKeyRequestBody body) { }
+        public static Turnkey.Http FromTargetPrivateKey(string targetPrivateKey, string baseUrl = "https://api.turnkey.com") { }
+        public static Turnkey.Http GetHttpClient(string encryptedCredentialBundle, string targetPrivateKey, string baseUrl = "https://api.turnkey.com") { }
+        public class ExportPrivateKeyParameters
+        {
+            public ExportPrivateKeyParameters() { }
+            [System.Text.Json.Serialization.JsonPropertyName("privateKeyId")]
+            public string PrivateKeyId { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("targetPublicKey")]
+            public string TargetPublicKey { get; set; }
+        }
+        public class ExportPrivateKeyRequestBody
+        {
+            public ExportPrivateKeyRequestBody() { }
+            [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+            [System.Text.Json.Serialization.JsonPropertyName("generateAppProofs")]
+            public bool? GenerateAppProofs { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("organizationId")]
+            public string OrganizationId { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("parameters")]
+            public Turnkey.Http.ExportPrivateKeyParameters Parameters { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("timestampMs")]
+            public string TimestampMs { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("type")]
+            public string Type { get; set; }
+        }
+        public class ExportWalletAccountParameters
+        {
+            public ExportWalletAccountParameters() { }
+            [System.Text.Json.Serialization.JsonPropertyName("address")]
+            public string Address { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("targetPublicKey")]
+            public string TargetPublicKey { get; set; }
+        }
+        public class ExportWalletAccountRequestBody
+        {
+            public ExportWalletAccountRequestBody() { }
+            [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+            [System.Text.Json.Serialization.JsonPropertyName("generateAppProofs")]
+            public bool? GenerateAppProofs { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("organizationId")]
+            public string OrganizationId { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("parameters")]
+            public Turnkey.Http.ExportWalletAccountParameters Parameters { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("timestampMs")]
+            public string TimestampMs { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("type")]
+            public string Type { get; set; }
+        }
+        public class ImportPrivateKeyParameters
+        {
+            public ImportPrivateKeyParameters() { }
+            [System.Text.Json.Serialization.JsonPropertyName("addressFormats")]
+            public string[] AddressFormats { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("curve")]
+            public string Curve { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("encryptedBundle")]
+            public string EncryptedBundle { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("privateKeyName")]
+            public string PrivateKeyName { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("userId")]
+            public string UserId { get; set; }
+        }
+        public class ImportPrivateKeyRequestBody
+        {
+            public ImportPrivateKeyRequestBody() { }
+            [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+            [System.Text.Json.Serialization.JsonPropertyName("generateAppProofs")]
+            public bool? GenerateAppProofs { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("organizationId")]
+            public string OrganizationId { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("parameters")]
+            public Turnkey.Http.ImportPrivateKeyParameters Parameters { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("timestampMs")]
+            public string TimestampMs { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("type")]
+            public string Type { get; set; }
+        }
+        public class InitImportPrivateKeyParameters
+        {
+            public InitImportPrivateKeyParameters() { }
+            [System.Text.Json.Serialization.JsonPropertyName("userId")]
+            public string UserId { get; set; }
+        }
+        public class InitImportPrivateKeyRequestBody
+        {
+            public InitImportPrivateKeyRequestBody() { }
+            [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+            [System.Text.Json.Serialization.JsonPropertyName("generateAppProofs")]
+            public bool? GenerateAppProofs { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("organizationId")]
+            public string OrganizationId { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("parameters")]
+            public Turnkey.Http.InitImportPrivateKeyParameters Parameters { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("timestampMs")]
+            public string TimestampMs { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("type")]
+            public string Type { get; set; }
+        }
+        public class SignedRequest
+        {
+            public SignedRequest() { }
+            [System.Text.Json.Serialization.JsonPropertyName("body")]
+            public string Body { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("stamp")]
+            public Turnkey.Http.Stamp Stamp { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("url")]
+            public string Url { get; set; }
+        }
+        public class Stamp
+        {
+            public Stamp() { }
+            [System.Text.Json.Serialization.JsonPropertyName("stampHeaderName")]
+            public string StampHeaderName { get; set; }
+            [System.Text.Json.Serialization.JsonPropertyName("stampHeaderValue")]
+            public string StampHeaderValue { get; set; }
+        }
+        public class WhoamiRequestBody
+        {
+            public WhoamiRequestBody() { }
+            [System.Text.Json.Serialization.JsonPropertyName("organizationId")]
+            public string OrganizationId { get; set; }
+        }
+    }
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.ApiKeyStamper.TurnkeyStamp))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Crypto.HpkeBundlePayload))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.ExportPrivateKeyParameters))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.ExportPrivateKeyRequestBody))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.ExportWalletAccountParameters))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.ExportWalletAccountRequestBody))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.ImportPrivateKeyParameters))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.ImportPrivateKeyRequestBody))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.InitImportPrivateKeyParameters))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.InitImportPrivateKeyRequestBody))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.SignedRequest))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.Stamp))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Turnkey.Http.WhoamiRequestBody))]
+    [System.Text.Json.Serialization.JsonSourceGenerationOptions(DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.Never, PropertyNameCaseInsensitive=false, WriteIndented=false)]
+    public class TurnkeyJsonContext : System.Text.Json.Serialization.JsonSerializerContext, System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver
+    {
+        public static readonly System.Text.Encodings.Web.JavaScriptEncoder JsCompatibleEncoder;
+        public TurnkeyJsonContext() { }
+        public TurnkeyJsonContext(System.Text.Json.JsonSerializerOptions options) { }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<bool> Boolean { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.ExportPrivateKeyParameters> ExportPrivateKeyParameters { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.ExportPrivateKeyRequestBody> ExportPrivateKeyRequestBody { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.ExportWalletAccountParameters> ExportWalletAccountParameters { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.ExportWalletAccountRequestBody> ExportWalletAccountRequestBody { get; }
+        protected override System.Text.Json.JsonSerializerOptions? GeneratedSerializerOptions { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Crypto.HpkeBundlePayload> HpkeBundlePayload { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.ImportPrivateKeyParameters> ImportPrivateKeyParameters { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.ImportPrivateKeyRequestBody> ImportPrivateKeyRequestBody { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.InitImportPrivateKeyParameters> InitImportPrivateKeyParameters { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.InitImportPrivateKeyRequestBody> InitImportPrivateKeyRequestBody { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<bool?> NullableBoolean { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.SignedRequest> SignedRequest { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.Stamp> Stamp { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<string> String { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<string[]> StringArray { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.ApiKeyStamper.TurnkeyStamp> TurnkeyStamp { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<Turnkey.Http.WhoamiRequestBody> WhoamiRequestBody { get; }
+        public static Turnkey.TurnkeyJsonContext Default { get; }
+        public override System.Text.Json.Serialization.Metadata.JsonTypeInfo? GetTypeInfo(System.Type type) { }
+    }
+}
