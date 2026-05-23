@@ -25,6 +25,7 @@ namespace Turnkey
         PropertyNameCaseInsensitive = false,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never)]
     [JsonSerializable(typeof(Crypto.HpkeBundlePayload))]
+    [JsonSerializable(typeof(ApiKeyStamper.TurnkeyStamp))]
     public partial class TurnkeyJsonContext : JsonSerializerContext
     {
     }
