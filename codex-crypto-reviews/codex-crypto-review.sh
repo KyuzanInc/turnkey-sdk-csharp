@@ -87,8 +87,11 @@ B. Method coverage table: every public + internal helper method in src/$CS_FILE
 C. Intentional adaptations: list every C#/TS adaptation pattern with a one-line
    justification that it is structural (no wire-byte or observable-behavior change).
 
-D. (Crypto.cs only) D17 enforcement check. Confirm BouncyCastle is used only for
-   ECDSA / ECDH / AES-GCM / SHA-256 / HMAC / BigInteger / EC point primitives.
+D. (Crypto.cs only) D17 enforcement check. BouncyCastle allow-list:
+     - ECDSA P-256 sign/verify, ECDH P-256, AES-GCM (128-bit tag), SHA-256,
+       HMAC-SHA256, BigInteger arithmetic, EC point operations.
+     - Ed25519PrivateKeyParameters.GeneratePublicKey (seed -> public key)
+       only in the SOLANA export branch of DecryptExportBundle.
    Banned APIs (must not appear):
      - Org.BouncyCastle.Crypto.Generators.HkdfBytesGenerator
      - Org.BouncyCastle.Crypto.Hpke.*

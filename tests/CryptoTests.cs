@@ -60,6 +60,19 @@ namespace Turnkey.Tests
         }
 
         [Fact]
+        public void ModSqrt_NegativeX_Throws()
+        {
+            // Upstream JS BigInt % keeps the sign of the dividend, so a
+            // negative x stays negative through "base = x % p" and then
+            // fails the squareRoot check. Mirror that.
+            var p = new BigInteger("7");
+            var x = new BigInteger("-4");
+            Action act = () => Crypto.Math.ModSqrt(x, p);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("could not find a modular square root");
+        }
+
+        [Fact]
         public void ModSqrt_P256Prime_Works()
         {
             // P-256 prime. Pick any quadratic residue: 4 = 2^2.
@@ -273,6 +286,35 @@ namespace Turnkey.Tests
             byte[] viaBytes = Crypto.GetPublicKey(Encoding.Uint8ArrayFromHexString(kp.PrivateKey));
             byte[] viaHex = Crypto.GetPublicKey(kp.PrivateKey);
             viaBytes.Should().Equal(viaHex);
+        }
+
+        [Fact]
+        public void GetPublicKey_InvalidKeyLength_Throws()
+        {
+            // Upstream noble p256.getPublicKey requires exactly 32 bytes.
+            Action act = () => Crypto.GetPublicKey(new byte[31]);
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("invalid P-256 private key: expected 32 bytes, got 31");
+        }
+
+        [Fact]
+        public void GetPublicKey_ScalarZero_Throws()
+        {
+            // Upstream noble rejects scalar 0 (outside [1, n-1]).
+            Action act = () => Crypto.GetPublicKey(new byte[32]);
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("invalid P-256 private key: scalar must be in [1, n - 1]");
+        }
+
+        [Fact]
+        public void GetPublicKey_ScalarEqualsN_Throws()
+        {
+            // Use the curve order N (= 0xffffff...bce6faada7179e84f3b9cac2fc632551)
+            byte[] nBytes = Encoding.Uint8ArrayFromHexString(
+                "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
+            Action act = () => Crypto.GetPublicKey(nBytes);
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("invalid P-256 private key: scalar must be in [1, n - 1]");
         }
 
         // ============================================================

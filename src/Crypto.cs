@@ -148,22 +148,31 @@ namespace Turnkey
             /// Modular square root via Tonelli-Shanks. Equivalent to
             /// upstream <c>math.ts modSqrt</c>.
             /// </summary>
-            /// <param name="x">Value to take the square root of (must be non-negative; EC field-element semantics).</param>
+            /// <param name="x">Value to take the square root of.</param>
             /// <param name="p">Prime modulus.</param>
             /// <returns>One square root of <paramref name="x"/> modulo <paramref name="p"/>.</returns>
             /// <remarks>
-            /// All known call sites in <c>@turnkey/crypto</c> pass a non-negative
-            /// <paramref name="x"/> derived from an EC field coordinate, where
-            /// BouncyCastle <c>BigInteger.Mod</c> and JS <c>BigInt %</c> agree.
-            /// For symmetry with the JS surface, the result for a negative
-            /// <paramref name="x"/> may differ; this is not exercised in
-            /// production code paths.
+            /// JS <c>BigInt %</c> keeps the sign of the dividend, so upstream
+            /// <c>x % p</c> on a negative <paramref name="x"/> stays negative
+            /// and then fails the <c>squareRoot * squareRoot % p !== base</c>
+            /// check (since the right-hand side is negative). This port
+            /// reproduces the same outcome explicitly by throwing the same
+            /// upstream error for negative input.
             /// </remarks>
             public static BigInteger ModSqrt(BigInteger x, BigInteger p)
             {
                 if (p.CompareTo(BigInteger.Zero) <= 0)
                 {
                     throw new ArgumentException("p must be positive");
+                }
+                // Upstream JS computes base = x % p and then verifies
+                // squareRoot * squareRoot % p == base. For negative x the
+                // JS remainder is negative, which mismatches the always-
+                // positive RHS and triggers
+                // "could not find a modular square root". Match that.
+                if (x.SignValue < 0)
+                {
+                    throw new InvalidOperationException("could not find a modular square root");
                 }
                 var baseVal = x.Mod(p);
 
@@ -343,18 +352,12 @@ namespace Turnkey
         /// </summary>
         public static byte[] GetPublicKey(byte[] privateKey, bool isCompressed = true)
         {
-            if (privateKey == null)
-            {
-                throw new ArgumentNullException(nameof(privateKey));
-            }
-            var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
-            var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
-
-            var d = new BigInteger(1, privateKey);
-            var privateKeyParams = new ECPrivateKeyParameters(d, domainParams);
+            // Upstream uses noble's p256.getPublicKey which validates that
+            // the private key is exactly 32 bytes and that the scalar lies
+            // in [1, n-1]. Mirror that here.
+            var (d, domainParams) = ValidateAndDeserializeP256PrivateKey(privateKey);
             var publicKeyParams = new ECPublicKeyParameters(
-                privateKeyParams.Parameters.G.Multiply(d), domainParams);
-
+                domainParams.G.Multiply(d), domainParams);
             return publicKeyParams.Q.GetEncoded(isCompressed);
         }
 
@@ -922,14 +925,12 @@ namespace Turnkey
 
         private static byte[] DeriveSS(byte[] encappedKeyBuf, string privHex)
         {
-            var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
-            var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
-
+            // Upstream noble p256.getSharedSecret validates the private scalar.
             var privBytes = Encoding.Uint8ArrayFromHexString(privHex);
-            var d = new BigInteger(1, privBytes);
+            var (d, domainParams) = ValidateAndDeserializeP256PrivateKey(privBytes);
             var privateKeyParams = new ECPrivateKeyParameters(d, domainParams);
 
-            var point = curve.Curve.DecodePoint(encappedKeyBuf);
+            var point = domainParams.Curve.DecodePoint(encappedKeyBuf);
             var publicKeyParams = new ECPublicKeyParameters(point, domainParams);
 
             var agreement = new ECDHBasicAgreement();
@@ -944,6 +945,36 @@ namespace Turnkey
                 ss = padded;
             }
             return ss;
+        }
+
+        /// <summary>
+        /// Validates a P-256 private key against noble's invariants: exactly
+        /// 32 bytes and scalar in [1, n - 1]. Returns the parsed scalar and
+        /// curve domain parameters for reuse.
+        /// </summary>
+        private static (BigInteger Scalar, ECDomainParameters DomainParams)
+            ValidateAndDeserializeP256PrivateKey(byte[] privateKey)
+        {
+            if (privateKey == null)
+            {
+                throw new ArgumentNullException(nameof(privateKey));
+            }
+            if (privateKey.Length != 32)
+            {
+                throw new ArgumentException(
+                    "invalid P-256 private key: expected 32 bytes, got " + privateKey.Length);
+            }
+
+            var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
+            var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
+
+            var d = new BigInteger(1, privateKey);
+            if (d.SignValue == 0 || d.CompareTo(domainParams.N) >= 0)
+            {
+                throw new ArgumentException(
+                    "invalid P-256 private key: scalar must be in [1, n - 1]");
+            }
+            return (d, domainParams);
         }
 
         private static byte[] GetKemContext(byte[] encappedKeyBuf, string publicKey)
