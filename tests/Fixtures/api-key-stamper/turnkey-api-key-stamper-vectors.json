@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "level": "upstream-test-vectors",
+    "source_fixture": "codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__fixtures__/api-key.{public,private}",
+    "source_test": "codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/stamp-test.ts",
+    "package": "@turnkey/api-key-stamper@0.5.0",
+    "tarball_sha256": "962a2d22c7c40240f05be98533769b37ab7dad7dbb5abec762c41007233d02bd",
+    "runtime_parity_target": "purejs",
+    "note": "P-256 ECDSA signatures are NOT byte-identical across runtimes when the upstream impl uses random-k (nodecrypto.ts, webcrypto.ts). This C# port mirrors upstream's purejs runtime which uses RFC 6979 deterministic-k, so the signature bytes are reproducible. Either way, all signatures verify under the same public key + SHA-256(content)."
+  },
+  "apiKeyFixture": {
+    "privateKeyHex": "487f361ddfd73440e707f4daa6775b376859e8a3c9f29b3bb694a12927c0213c",
+    "publicKeyHex":  "02f739f8c77b32f4d5f13265861febd76e7a9c61a1140d296b8c16302508870316"
+  },
+  "stampShape": {
+    "_source_line": "ts-source/__tests__/stamp-test.ts:14-37",
+    "stampHeaderName": "X-Stamp",
+    "decodedKeysInOrder": ["publicKey", "scheme", "signature"],
+    "scheme": "SIGNATURE_SCHEME_TK_API_P256",
+    "stamp_test_message": "hello from TKHQ!",
+    "stamp_test_assertion": "Decode base64url -> JSON.parse; keys equal ['publicKey', 'scheme', 'signature']; publicKey == fixture.publicKey; scheme == SIGNATURE_SCHEME_TK_API_P256; signature verifies as DER ECDSA against SHA-256(message) under the fixture public key."
+  }
+}

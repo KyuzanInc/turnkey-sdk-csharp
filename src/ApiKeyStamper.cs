@@ -41,6 +41,23 @@ namespace Turnkey
     /// Stamper for Turnkey API requests. 1:1 logical port of upstream
     /// <c>@turnkey/api-key-stamper</c> at peak's pinned version 0.5.0.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Runtime parity target:</b> this port mirrors upstream's
+    /// <c>purejs</c> runtime (deterministic ECDSA via RFC 6979 + low-S).
+    /// Upstream's default <c>detectRuntime()</c> picks <c>"node"</c> in
+    /// Node which dispatches to <c>nodecrypto.ts</c> and produces
+    /// non-deterministic signatures (random k); behavior parity with
+    /// that runtime is intentionally NOT a goal — Turnkey's backend
+    /// accepts either, but the C# wire bytes will only match
+    /// deterministically against upstream <c>runtimeOverride: "purejs"</c>
+    /// callers. All three runtimes produce signatures that verify against
+    /// the same public key, so end-to-end Turnkey API calls work
+    /// regardless.</para>
+    /// <para><b>Validation timing:</b> the constructor parses but does NOT
+    /// validate the private key. Validation happens in
+    /// <see cref="SignWithApiKey(string)"/>, matching upstream which only
+    /// constructs noble's key object at sign time.</para>
+    /// </remarks>
     public class ApiKeyStamper
     {
         /// <summary>Header name used by Turnkey API requests.</summary>
@@ -51,36 +68,21 @@ namespace Turnkey
 
         private readonly string _apiPublicKey;
         private readonly string _apiPrivateKey;
-        private readonly BigInteger _privateKeyScalar;
-        private readonly ECDomainParameters _domainParams;
 
         /// <summary>
         /// Initialize the stamper with a P-256 API key pair.
         /// </summary>
         /// <param name="apiPublicKey">Compressed P-256 public key as hex (66 chars).</param>
         /// <param name="apiPrivateKey">P-256 private key scalar as 64 hex chars.</param>
+        /// <remarks>
+        /// The constructor only stores the strings. Key parsing and range
+        /// validation happen lazily in <see cref="SignWithApiKey(string)"/>,
+        /// matching upstream which builds noble's key object on each sign.
+        /// </remarks>
         public ApiKeyStamper(string apiPublicKey, string apiPrivateKey)
         {
             _apiPublicKey = apiPublicKey ?? throw new ArgumentNullException(nameof(apiPublicKey));
             _apiPrivateKey = apiPrivateKey ?? throw new ArgumentNullException(nameof(apiPrivateKey));
-
-            var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
-            _domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
-
-            // Parse + validate private key against the noble invariants
-            // (exactly 32 bytes, scalar in [1, n - 1]).
-            var privateKeyBytes = Encoding.Uint8ArrayFromHexString(_apiPrivateKey);
-            if (privateKeyBytes.Length != 32)
-            {
-                throw new ArgumentException(
-                    "invalid P-256 private key: expected 32 bytes, got " + privateKeyBytes.Length);
-            }
-            _privateKeyScalar = new BigInteger(1, privateKeyBytes);
-            if (_privateKeyScalar.SignValue == 0 || _privateKeyScalar.CompareTo(_domainParams.N) >= 0)
-            {
-                throw new ArgumentException(
-                    "invalid P-256 private key: scalar must be in [1, n - 1]");
-            }
         }
 
         /// <summary>
@@ -149,10 +151,15 @@ namespace Turnkey
         {
             if (content == null) throw new ArgumentNullException(nameof(content));
 
-            // Upstream:
+            // Upstream `purejs.ts`:
             //   const publicKey = p256.getPublicKey(input.privateKey, true);
             //   const publicKeyString = uint8ArrayToHexString(publicKey);
             //   if (publicKeyString != input.publicKey) throw new Error(...);
+            //
+            // Crypto.GetPublicKey enforces the noble invariants (exact 32-byte
+            // private key, scalar in [1, n - 1]) before deriving the public
+            // key. Per the upstream pattern this validation happens at sign
+            // time, not at constructor time.
             byte[] derivedPublicKeyBytes = Crypto.GetPublicKey(_apiPrivateKey, isCompressed: true);
             string derivedPublicKey = Encoding.Uint8ArrayToHexString(derivedPublicKeyBytes);
             if (!string.Equals(derivedPublicKey, _apiPublicKey, StringComparison.Ordinal))
@@ -166,6 +173,11 @@ namespace Turnkey
             //   const hash = createHash().update(input.content).digest();   // SHA-256
             //   const signature = p256.sign(hash, input.privateKey);        // RFC 6979 + lowS
             //   return signature.toDERHex();
+            var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
+            var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
+            var privateKeyBytes = Encoding.Uint8ArrayFromHexString(_apiPrivateKey);
+            var privateKeyScalar = new BigInteger(1, privateKeyBytes);
+
             byte[] payloadBytes = System.Text.Encoding.UTF8.GetBytes(content);
 
             var digest = DigestUtilities.GetDigest("SHA-256");
@@ -175,17 +187,17 @@ namespace Turnkey
 
             var hmacCalculator = new HMacDsaKCalculator(DigestUtilities.GetDigest("SHA-256"));
             var signer = new ECDsaSigner(hmacCalculator);
-            signer.Init(true, new ECPrivateKeyParameters(_privateKeyScalar, _domainParams));
+            signer.Init(true, new ECPrivateKeyParameters(privateKeyScalar, domainParams));
 
             BigInteger[] signature = signer.GenerateSignature(hash);
             BigInteger r = signature[0];
             BigInteger s = signature[1];
 
             // Low-S normalization (noble enables lowS by default).
-            BigInteger halfN = _domainParams.N.ShiftRight(1);
+            BigInteger halfN = domainParams.N.ShiftRight(1);
             if (s.CompareTo(halfN) > 0)
             {
-                s = _domainParams.N.Subtract(s);
+                s = domainParams.N.Subtract(s);
             }
 
             return EncodeDerSignatureHex(r, s);

@@ -38,19 +38,30 @@ namespace Turnkey.Tests
             "02f739f8c77b32f4d5f13265861febd76e7a9c61a1140d296b8c16302508870316";
 
         [Fact]
-        public void Constructor_RejectsBadKeyLength()
+        public void Constructor_DefersValidation()
         {
-            // Private key not exactly 32 bytes -> reject
+            // Upstream `new ApiKeyStamper({apiPublicKey, apiPrivateKey})` only
+            // assigns fields; validation happens at sign time. C# mirrors that.
             Action act = () => new ApiKeyStamper(FixturePublicKey, "abcd");
+            act.Should().NotThrow();
+        }
+
+        [Fact]
+        public void SignWithApiKey_RejectsBadKeyLength()
+        {
+            // Validation now occurs in SignWithApiKey -> Crypto.GetPublicKey.
+            var stamper = new ApiKeyStamper(FixturePublicKey, "abcd");
+            Action act = () => stamper.SignWithApiKey("payload");
             act.Should().Throw<ArgumentException>()
                .WithMessage("invalid P-256 private key: expected 32 bytes, got 2");
         }
 
         [Fact]
-        public void Constructor_RejectsZeroScalar()
+        public void SignWithApiKey_RejectsZeroScalar()
         {
             string zero = new string('0', 64);
-            Action act = () => new ApiKeyStamper(FixturePublicKey, zero);
+            var stamper = new ApiKeyStamper(FixturePublicKey, zero);
+            Action act = () => stamper.SignWithApiKey("payload");
             act.Should().Throw<ArgumentException>()
                .WithMessage("invalid P-256 private key: scalar must be in [1, n - 1]");
         }
