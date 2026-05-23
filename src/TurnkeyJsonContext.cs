@@ -26,6 +26,17 @@ namespace Turnkey
         DefaultIgnoreCondition = JsonIgnoreCondition.Never)]
     [JsonSerializable(typeof(Crypto.HpkeBundlePayload))]
     [JsonSerializable(typeof(ApiKeyStamper.TurnkeyStamp))]
+    [JsonSerializable(typeof(Http.WhoamiRequestBody))]
+    [JsonSerializable(typeof(Http.InitImportPrivateKeyRequestBody))]
+    [JsonSerializable(typeof(Http.InitImportPrivateKeyParameters))]
+    [JsonSerializable(typeof(Http.ImportPrivateKeyRequestBody))]
+    [JsonSerializable(typeof(Http.ImportPrivateKeyParameters))]
+    [JsonSerializable(typeof(Http.ExportPrivateKeyRequestBody))]
+    [JsonSerializable(typeof(Http.ExportPrivateKeyParameters))]
+    [JsonSerializable(typeof(Http.ExportWalletAccountRequestBody))]
+    [JsonSerializable(typeof(Http.ExportWalletAccountParameters))]
+    [JsonSerializable(typeof(Http.SignedRequest))]
+    [JsonSerializable(typeof(Http.Stamp))]
     public partial class TurnkeyJsonContext : JsonSerializerContext
     {
     }
