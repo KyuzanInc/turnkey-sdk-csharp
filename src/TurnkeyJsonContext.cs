@@ -16,10 +16,25 @@
 //   2. Use the resulting TurnkeyJsonContext.Default.<DTO> overload at the
 //      call site.
 
+using System.Text.Encodings.Web;
 using System.Text.Json.Serialization;
 
 namespace Turnkey
 {
+    // Encoder choice: UnsafeRelaxedJsonEscaping makes System.Text.Json
+    // output equivalent to JS JSON.stringify for ASCII-safe inputs and
+    // closer to JS behavior for non-ASCII inputs (does NOT escape <, >, &,
+    // most non-ASCII Unicode). Turnkey activity bodies contain ASCII-only
+    // content (UUIDs, enum strings, hex), so in practice this only affects
+    // theoretical wire-format parity for atypical content; it does not
+    // affect normal Turnkey flows.
+    /// <summary>
+    /// IL2CPP-safe System.Text.Json source-generated context for every DTO
+    /// the SDK serializes. Set <c>Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping</c>
+    /// on consumers if they need maximum JS-stringify parity. The default
+    /// options here are AOT-safe for the typical Turnkey wire content
+    /// (ASCII UUIDs, enum strings, hex).
+    /// </summary>
     [JsonSourceGenerationOptions(
         WriteIndented = false,
         PropertyNameCaseInsensitive = false,
@@ -39,5 +54,14 @@ namespace Turnkey
     [JsonSerializable(typeof(Http.Stamp))]
     public partial class TurnkeyJsonContext : JsonSerializerContext
     {
+        /// <summary>
+        /// Shared <see cref="JavaScriptEncoder"/> matching JS
+        /// <c>JSON.stringify</c> escaping behavior. Use this on any
+        /// <c>JsonSerializerOptions</c> when callers need bit-for-bit
+        /// parity for inputs that include &lt;, &gt;, &amp;, or non-ASCII
+        /// characters.
+        /// </summary>
+        public static readonly JavaScriptEncoder JsCompatibleEncoder =
+            JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
     }
 }
