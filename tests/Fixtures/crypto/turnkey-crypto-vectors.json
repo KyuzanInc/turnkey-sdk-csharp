@@ -1,0 +1,35 @@
+{
+  "_provenance": {
+    "level": "upstream-test-vectors",
+    "source": "codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts",
+    "package": "@turnkey/crypto@2.8.8",
+    "tarball_sha256": "75115706fccc29c664f9f918d9a0c2c1798eb03f261cb5b0c186c75663cf79d3",
+    "note": "Real Turnkey-pinned credential bundle test vector. Verified by Codex r2 against the upstream Jest test (__tests__/crypto-test.ts line 179-184)."
+  },
+  "decryptCredentialBundle": [
+    {
+      "_source_line": "ts-source/__tests__/crypto-test.ts:179-184",
+      "input": {
+        "credentialBundle": "w99a5xV6A75TfoAUkZn869fVyDYvgVsKrawMALZXmrauZd8hEv66EkPU1Z42CUaHESQjcA5bqd8dynTGBMLWB9ewtXWPEVbZvocB4Tw2K1vQVp7uwjf",
+        "embeddedKey": "20fa65df11f24833790ae283fc9a0c215eecbbc589549767977994dc69d05a56"
+      },
+      "expectedHex": "67ee05fc3bdf4161bc70701c221d8d77180294cefcfcea64ba83c4d4c732fcb9"
+    }
+  ],
+  "uncompressRawPublicKey": {
+    "invalid_prefix": {
+      "_source_line": "ts-source/__tests__/crypto-test.ts:243-250",
+      "input_hex": "77c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "expected_error_message": "failed to uncompress raw public key: invalid prefix"
+    },
+    "invalid_length": {
+      "_source_line": "ts-source/__tests__/crypto-test.ts:252-260",
+      "note": "Upstream feeds keypair.publicKey + keypair.publicKey (66 bytes); we use any non-33-byte buffer.",
+      "expected_error_message": "failed to uncompress raw public key: invalid length"
+    }
+  },
+  "compressRawPublicKey": {
+    "_source_line": "ts-source/__tests__/crypto-test.ts:173-178",
+    "roundtrip_note": "compress(publicKeyUncompressed) === publicKey for any P-256 key pair."
+  }
+}

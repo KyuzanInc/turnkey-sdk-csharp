@@ -476,9 +476,57 @@ namespace Turnkey.Tests
         }
 
         // ============================================================
-        // Bundle helpers — negative paths only (positive paths require
-        // Turnkey-signed sample bundles which we do not have here)
+        // Bundle helpers — including a real Turnkey-pinned vector
         // ============================================================
+
+        [Fact]
+        public void DecryptCredentialBundle_UpstreamVector()
+        {
+            // From upstream tests/__tests__/crypto-test.ts:179-184
+            // (codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts)
+            const string credentialBundle =
+                "w99a5xV6A75TfoAUkZn869fVyDYvgVsKrawMALZXmrauZd8hEv66EkPU1Z42CUaHESQjcA5bqd8dynTGBMLWB9ewtXWPEVbZvocB4Tw2K1vQVp7uwjf";
+            const string embeddedKey =
+                "20fa65df11f24833790ae283fc9a0c215eecbbc589549767977994dc69d05a56";
+            const string expectedSenderPrivateKey =
+                "67ee05fc3bdf4161bc70701c221d8d77180294cefcfcea64ba83c4d4c732fcb9";
+
+            string decrypted = Crypto.DecryptCredentialBundle(credentialBundle, embeddedKey);
+            decrypted.Should().Be(expectedSenderPrivateKey);
+        }
+
+        [Fact]
+        public void UncompressRawPublicKey_UpstreamInvalidPrefixVector()
+        {
+            // From upstream tests/__tests__/crypto-test.ts:243-250
+            byte[] invalidPrefix = Encoding.Uint8ArrayFromHexString(
+                "77c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5");
+            Action act = () => Crypto.UncompressRawPublicKey(invalidPrefix);
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("failed to uncompress raw public key: invalid prefix");
+        }
+
+        [Fact]
+        public void CompressRawPublicKey_EmptyInput_ReturnsEmpty()
+        {
+            // Upstream behavior: empty Uint8Array slice produces empty result.
+            Crypto.CompressRawPublicKey(Array.Empty<byte>()).Should().BeEmpty();
+        }
+
+        [Fact]
+        public void HpkeEncrypt_NullPlainTextBuf_Throws()
+        {
+            // Upstream throws when plainTextBuf is absent (wrapped via try/catch).
+            var recv = Crypto.GenerateP256KeyPair();
+            byte[] recvPubUncompressed = Encoding.Uint8ArrayFromHexString(recv.PublicKeyUncompressed);
+            Action act = () => Crypto.HpkeEncrypt(new Crypto.HpkeEncryptParams
+            {
+                PlainTextBuf = null,
+                TargetKeyBuf = recvPubUncompressed,
+            });
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("Unable to perform hpkeEncrypt:*");
+        }
 
         [Fact]
         public void DecryptCredentialBundle_BundleTooSmall_Throws()

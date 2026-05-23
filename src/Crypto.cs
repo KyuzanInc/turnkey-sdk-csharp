@@ -456,7 +456,8 @@ namespace Turnkey
             try
             {
                 if (parameters == null) throw new ArgumentNullException(nameof(parameters));
-                var plainTextBuf = parameters.PlainTextBuf ?? Array.Empty<byte>();
+                var plainTextBuf = parameters.PlainTextBuf
+                                   ?? throw new ArgumentNullException(nameof(parameters.PlainTextBuf));
                 var targetKeyBuf = parameters.TargetKeyBuf
                                    ?? throw new ArgumentNullException(nameof(parameters.TargetKeyBuf));
 
@@ -516,6 +517,15 @@ namespace Turnkey
             if (rawPublicKey == null) throw new ArgumentNullException(nameof(rawPublicKey));
             int len = rawPublicKey.Length;
             // Upstream: var compressedBytes = rawPublicKey.slice(0, (1 + len) >>> 1);
+            // Empty input: TS produces an empty Uint8Array and the subsequent
+            // `compressedBytes[0] = 0x02 | (rawPublicKey[len-1]! & 0x01)` is a
+            // no-op (out-of-bounds typed-array assignment is ignored). Mirror
+            // that here so empty input returns an empty array instead of
+            // throwing.
+            if (len == 0)
+            {
+                return Array.Empty<byte>();
+            }
             int half = (1 + len) >> 1;
             var compressedBytes = new byte[half];
             Array.Copy(rawPublicKey, 0, compressedBytes, 0, half);
@@ -688,30 +698,43 @@ namespace Turnkey
         public static string EncryptPrivateKeyToBundle(EncryptPrivateKeyToBundleParams parameters)
         {
             if (parameters == null) throw new ArgumentNullException(nameof(parameters));
-            if (string.IsNullOrWhiteSpace(parameters.PrivateKey))
-                throw new ArgumentException("Private key is required", nameof(parameters.PrivateKey));
-            if (string.IsNullOrWhiteSpace(parameters.ImportBundle))
-                throw new ArgumentException("Import bundle is required", nameof(parameters.ImportBundle));
-            if (string.IsNullOrWhiteSpace(parameters.OrganizationId))
-                throw new ArgumentException("Organization ID is required", nameof(parameters.OrganizationId));
-            if (string.IsNullOrWhiteSpace(parameters.UserId))
-                throw new ArgumentException("User ID is required", nameof(parameters.UserId));
 
-            using var bundleDoc = JsonDocument.Parse(parameters.ImportBundle!);
+            // Upstream order, exactly:
+            //   1. JSON.parse(importBundle)
+            //   2. plainTextBuf = decodeKey(privateKey, keyFormat)
+            //   3. verifyEnclaveSignature(...)
+            //   4. parse signed data, check organizationId / userId / targetPublic
+            //   5. hpkeEncrypt + formatHpkeBuf
+            // We delegate "required string" failures to the upstream operations
+            // (JsonDocument.Parse, DecodeKey hex parse, etc.) instead of
+            // pre-validating, so the error precedence matches upstream.
+            if (parameters.ImportBundle == null)
+            {
+                throw new ArgumentNullException(nameof(parameters.ImportBundle));
+            }
+            if (parameters.PrivateKey == null)
+            {
+                throw new ArgumentNullException(nameof(parameters.PrivateKey));
+            }
+            using var bundleDoc = JsonDocument.Parse(parameters.ImportBundle);
             var parsedImportBundle = bundleDoc.RootElement;
 
-            // Upstream order: decodeKey FIRST, then verify, then check fields.
-            var plainTextBuf = DecodeKey(parameters.PrivateKey!, parameters.KeyFormat);
+            var plainTextBuf = DecodeKey(parameters.PrivateKey, parameters.KeyFormat);
 
             string? enclaveQuorumPublic = GetStringOrNull(parsedImportBundle, "enclaveQuorumPublic");
             string? dataSignature = GetStringOrNull(parsedImportBundle, "dataSignature");
             string? signedDataHex = GetStringOrNull(parsedImportBundle, "data");
 
-            VerifyEnclaveSignature(
+            bool verified = VerifyEnclaveSignature(
                 enclaveQuorumPublic,
                 dataSignature,
                 signedDataHex,
                 parameters.DangerouslyOverrideSignerPublicKey);
+            if (!verified)
+            {
+                throw new InvalidOperationException(
+                    "failed to verify enclave signature: " + parameters.ImportBundle);
+            }
 
             var signedDataBytes = Encoding.Uint8ArrayFromHexString(signedDataHex!);
             using var signedDoc = JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(signedDataBytes));
@@ -755,27 +778,36 @@ namespace Turnkey
         public static string DecryptExportBundle(DecryptExportBundleParams parameters)
         {
             if (parameters == null) throw new ArgumentNullException(nameof(parameters));
-            if (string.IsNullOrWhiteSpace(parameters.ExportBundle))
-                throw new ArgumentException("Export bundle is required", nameof(parameters.ExportBundle));
-            if (string.IsNullOrWhiteSpace(parameters.EmbeddedKey))
-                throw new ArgumentException("Embedded key is required", nameof(parameters.EmbeddedKey));
-            if (string.IsNullOrWhiteSpace(parameters.OrganizationId))
-                throw new ArgumentException("Organization ID is required", nameof(parameters.OrganizationId));
+            if (parameters.ExportBundle == null)
+                throw new ArgumentNullException(nameof(parameters.ExportBundle));
 
+            // Upstream order, exactly:
+            //   1. enter try
+            //   2. JSON.parse(exportBundle)
+            //   3. verifyEnclaveSignature(...)
+            //   4. parse signed data, check organizationId, encappedPublic
+            //   5. hpkeDecrypt
+            //   6. format output (SOLANA / mnemonic / hex)
+            //   catch -> "Error decrypting bundle: ..."
             try
             {
-                using var bundleDoc = JsonDocument.Parse(parameters.ExportBundle!);
+                using var bundleDoc = JsonDocument.Parse(parameters.ExportBundle);
                 var parsedExportBundle = bundleDoc.RootElement;
 
                 string? enclaveQuorumPublic = GetStringOrNull(parsedExportBundle, "enclaveQuorumPublic");
                 string? dataSignature = GetStringOrNull(parsedExportBundle, "dataSignature");
                 string? dataHex = GetStringOrNull(parsedExportBundle, "data");
 
-                VerifyEnclaveSignature(
+                bool verified = VerifyEnclaveSignature(
                     enclaveQuorumPublic,
                     dataSignature,
                     dataHex,
                     parameters.DangerouslyOverrideSignerPublicKey);
+                if (!verified)
+                {
+                    throw new InvalidOperationException(
+                        "failed to verify enclave signature: " + parameters.ExportBundle);
+                }
 
                 var signedDataBytes = Encoding.Uint8ArrayFromHexString(dataHex!);
                 using var signedDoc = JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(signedDataBytes));
@@ -1014,9 +1046,12 @@ namespace Turnkey
 
         /// <summary>
         /// Equivalent to upstream <c>turnkey.ts verifyEnclaveSignature</c>.
-        /// Throws on mismatch / failed verification.
+        /// Returns <c>true</c> when the signature verifies, <c>false</c>
+        /// when the underlying ECDSA verify fails. Throws on mismatched
+        /// signer key (matches upstream "expected signer key ... does not
+        /// match signer key from bundle").
         /// </summary>
-        private static void VerifyEnclaveSignature(
+        private static bool VerifyEnclaveSignature(
             string? enclaveQuorumPublic,
             string? signatureHex,
             string? signedDataHex,
@@ -1032,28 +1067,33 @@ namespace Turnkey
                     + " does not match signer key from bundle: " + enclaveQuorumPublic);
             }
 
+            // Upstream returns false when the verify call fails; the caller
+            // composes the contextual error message.
             if (string.IsNullOrEmpty(signatureHex) || string.IsNullOrEmpty(signedDataHex))
             {
-                throw new InvalidOperationException(
-                    "failed to verify enclave signature: missing signature or data");
+                return false;
             }
 
-            var publicKeyBytes = Encoding.Uint8ArrayFromHexString(expectedSignerPublicKey);
-            var signatureBytes = Encoding.Uint8ArrayFromHexString(signatureHex!);
-            var messageBytes = Encoding.Uint8ArrayFromHexString(signedDataHex!);
-
-            var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
-            var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
-            var point = curve.Curve.DecodePoint(publicKeyBytes);
-            var publicKeyParams = new ECPublicKeyParameters(point, domainParams);
-
-            var signer = SignerUtilities.GetSigner("SHA-256withECDSA");
-            signer.Init(false, publicKeyParams);
-            signer.BlockUpdate(messageBytes, 0, messageBytes.Length);
-
-            if (!signer.VerifySignature(signatureBytes))
+            try
             {
-                throw new InvalidOperationException("failed to verify enclave signature");
+                var publicKeyBytes = Encoding.Uint8ArrayFromHexString(expectedSignerPublicKey);
+                var signatureBytes = Encoding.Uint8ArrayFromHexString(signatureHex!);
+                var messageBytes = Encoding.Uint8ArrayFromHexString(signedDataHex!);
+
+                var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
+                var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
+                var point = curve.Curve.DecodePoint(publicKeyBytes);
+                var publicKeyParams = new ECPublicKeyParameters(point, domainParams);
+
+                var signer = SignerUtilities.GetSigner("SHA-256withECDSA");
+                signer.Init(false, publicKeyParams);
+                signer.BlockUpdate(messageBytes, 0, messageBytes.Length);
+
+                return signer.VerifySignature(signatureBytes);
+            }
+            catch
+            {
+                return false;
             }
         }
 
