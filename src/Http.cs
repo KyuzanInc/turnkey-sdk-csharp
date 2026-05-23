@@ -153,7 +153,7 @@ namespace Turnkey
             var body = new WhoamiRequestBody { OrganizationId = organizationId };
             return CreateSignedRequest(
                 _baseUrl + "/public/v1/query/whoami",
-                JsonSerializer.Serialize(body, TurnkeyJsonContext.Default.WhoamiRequestBody));
+                JsonSerializer.Serialize(body, typeof(WhoamiRequestBody), TurnkeyJsonContext.JsCompatibleOptions));
         }
 
         /// <summary>
@@ -164,7 +164,7 @@ namespace Turnkey
             if (body == null) throw new ArgumentNullException(nameof(body));
             return CreateSignedRequest(
                 _baseUrl + "/public/v1/submit/init_import_private_key",
-                JsonSerializer.Serialize(body, TurnkeyJsonContext.Default.InitImportPrivateKeyRequestBody));
+                JsonSerializer.Serialize(body, typeof(InitImportPrivateKeyRequestBody), TurnkeyJsonContext.JsCompatibleOptions));
         }
 
         /// <summary>
@@ -175,7 +175,7 @@ namespace Turnkey
             if (body == null) throw new ArgumentNullException(nameof(body));
             return CreateSignedRequest(
                 _baseUrl + "/public/v1/submit/import_private_key",
-                JsonSerializer.Serialize(body, TurnkeyJsonContext.Default.ImportPrivateKeyRequestBody));
+                JsonSerializer.Serialize(body, typeof(ImportPrivateKeyRequestBody), TurnkeyJsonContext.JsCompatibleOptions));
         }
 
         /// <summary>
@@ -186,7 +186,7 @@ namespace Turnkey
             if (body == null) throw new ArgumentNullException(nameof(body));
             return CreateSignedRequest(
                 _baseUrl + "/public/v1/submit/export_private_key",
-                JsonSerializer.Serialize(body, TurnkeyJsonContext.Default.ExportPrivateKeyRequestBody));
+                JsonSerializer.Serialize(body, typeof(ExportPrivateKeyRequestBody), TurnkeyJsonContext.JsCompatibleOptions));
         }
 
         /// <summary>
@@ -197,7 +197,7 @@ namespace Turnkey
             if (body == null) throw new ArgumentNullException(nameof(body));
             return CreateSignedRequest(
                 _baseUrl + "/public/v1/submit/export_wallet_account",
-                JsonSerializer.Serialize(body, TurnkeyJsonContext.Default.ExportWalletAccountRequestBody));
+                JsonSerializer.Serialize(body, typeof(ExportWalletAccountRequestBody), TurnkeyJsonContext.JsCompatibleOptions));
         }
 
         private SignedRequest CreateSignedRequest(string url, string bodyJson)

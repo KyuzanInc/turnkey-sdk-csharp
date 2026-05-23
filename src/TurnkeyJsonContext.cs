@@ -56,12 +56,25 @@ namespace Turnkey
     {
         /// <summary>
         /// Shared <see cref="JavaScriptEncoder"/> matching JS
-        /// <c>JSON.stringify</c> escaping behavior. Use this on any
-        /// <c>JsonSerializerOptions</c> when callers need bit-for-bit
-        /// parity for inputs that include &lt;, &gt;, &amp;, or non-ASCII
-        /// characters.
+        /// <c>JSON.stringify</c> escaping behavior.
         /// </summary>
         public static readonly JavaScriptEncoder JsCompatibleEncoder =
             JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
+
+        /// <summary>
+        /// Source-generated serializer options that route every supported
+        /// type through this context AND apply
+        /// <see cref="JsCompatibleEncoder"/>. Internal SDK serialization
+        /// goes through this so that non-ASCII / HTML-sensitive characters
+        /// in user-controlled strings (organization IDs, private key names,
+        /// etc.) are escaped the same way JS <c>JSON.stringify</c> does.
+        /// </summary>
+        public static readonly System.Text.Json.JsonSerializerOptions JsCompatibleOptions =
+            new System.Text.Json.JsonSerializerOptions
+            {
+                TypeInfoResolver = Default,
+                Encoder = JsCompatibleEncoder,
+                WriteIndented = false,
+            };
     }
 }

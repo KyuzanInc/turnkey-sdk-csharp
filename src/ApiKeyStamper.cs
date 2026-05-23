@@ -134,7 +134,7 @@ namespace Turnkey
             };
 
             string stampJson = System.Text.Json.JsonSerializer.Serialize(
-                stamp, TurnkeyJsonContext.Default.TurnkeyStamp);
+                stamp, typeof(TurnkeyStamp), TurnkeyJsonContext.JsCompatibleOptions);
 
             return new StampResult
             {

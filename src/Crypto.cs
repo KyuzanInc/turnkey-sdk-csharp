@@ -641,7 +641,8 @@ namespace Turnkey
                 EncappedPublic = Encoding.Uint8ArrayToHexString(encappedPublicUncompressed),
                 Ciphertext = Encoding.Uint8ArrayToHexString(ciphertext),
             };
-            return JsonSerializer.Serialize(payload, TurnkeyJsonContext.Default.HpkeBundlePayload);
+            return JsonSerializer.Serialize(payload, typeof(HpkeBundlePayload),
+                TurnkeyJsonContext.JsCompatibleOptions);
         }
 
         #endregion

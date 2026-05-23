@@ -298,6 +298,7 @@ namespace Turnkey
     public class TurnkeyJsonContext : System.Text.Json.Serialization.JsonSerializerContext, System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver
     {
         public static readonly System.Text.Encodings.Web.JavaScriptEncoder JsCompatibleEncoder;
+        public static readonly System.Text.Json.JsonSerializerOptions JsCompatibleOptions;
         public TurnkeyJsonContext() { }
         public TurnkeyJsonContext(System.Text.Json.JsonSerializerOptions options) { }
         public System.Text.Json.Serialization.Metadata.JsonTypeInfo<bool> Boolean { get; }

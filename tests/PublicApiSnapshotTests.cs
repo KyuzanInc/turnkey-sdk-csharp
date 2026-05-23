@@ -39,11 +39,17 @@ namespace Turnkey.Tests
                 // assembly so test environments see it.
                 File.WriteAllText(baselinePath, actual);
             }
+            // Opt-in baseline regen: set TURNKEY_SDK_REGENERATE_PUBLIC_API=1
+            // before running this test to overwrite the baseline file.
+            if (System.Environment.GetEnvironmentVariable("TURNKEY_SDK_REGENERATE_PUBLIC_API") == "1")
+            {
+                File.WriteAllText(baselinePath, actual);
+            }
             string expected = File.ReadAllText(baselinePath);
 
             // Normalize line endings for cross-platform parity.
             actual.Replace("\r\n", "\n").Should().Be(expected.Replace("\r\n", "\n"),
-                "the public API has drifted. Delete tests/PublicApi.expected.txt to regenerate, then review the diff.");
+                "the public API has drifted. Re-run with TURNKEY_SDK_REGENERATE_PUBLIC_API=1 to update the baseline, then review the diff and commit.");
         }
 
         private static string ResolveBaselinePath()
