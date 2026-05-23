@@ -41,9 +41,12 @@ namespace Turnkey.Tests
         public void Constructor_DefersValidation()
         {
             // Upstream `new ApiKeyStamper({apiPublicKey, apiPrivateKey})` only
-            // assigns fields; validation happens at sign time. C# mirrors that.
+            // assigns fields; validation happens at sign time. C# mirrors
+            // that, including null tolerance.
             Action act = () => new ApiKeyStamper(FixturePublicKey, "abcd");
             act.Should().NotThrow();
+            Action act2 = () => new ApiKeyStamper(null!, null!);
+            act2.Should().NotThrow();
         }
 
         [Fact]

@@ -81,8 +81,11 @@ namespace Turnkey
         /// </remarks>
         public ApiKeyStamper(string apiPublicKey, string apiPrivateKey)
         {
-            _apiPublicKey = apiPublicKey ?? throw new ArgumentNullException(nameof(apiPublicKey));
-            _apiPrivateKey = apiPrivateKey ?? throw new ArgumentNullException(nameof(apiPrivateKey));
+            // Upstream constructor only assigns config fields without
+            // validating; mirror that exactly. We do allow null here so a
+            // subsequent SignWithApiKey call surfaces the failure naturally.
+            _apiPublicKey = apiPublicKey!;
+            _apiPrivateKey = apiPrivateKey!;
         }
 
         /// <summary>
@@ -193,7 +196,14 @@ namespace Turnkey
             BigInteger r = signature[0];
             BigInteger s = signature[1];
 
-            // Low-S normalization (noble enables lowS by default).
+            // Low-S normalization. @turnkey/api-key-stamper@0.5.0 depends on
+            // @noble/curves@^1.3.0, and noble v1.3.0
+            // (src/abstract/weierstrass.ts) defaults to lowS=true:
+            //   let { lowS, prehash, extraEntropy: ent } = opts;
+            //   if (lowS == null) lowS = true; // RFC6979 3.2
+            // The upstream purejs.ts call `p256.sign(hash, privateKey)` passes
+            // no opts, so the runtime emits low-S signatures. We reproduce
+            // that here by clamping s into (0, n/2].
             BigInteger halfN = domainParams.N.ShiftRight(1);
             if (s.CompareTo(halfN) > 0)
             {
