@@ -62,6 +62,10 @@ namespace Turnkey
         private Http(ApiKeyStamper stamper, string baseUrl)
         {
             _stamper = stamper ?? throw new ArgumentNullException(nameof(stamper));
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                throw new ArgumentException("baseUrl is required", nameof(baseUrl));
+            }
             _baseUrl = baseUrl;
         }
 
@@ -217,16 +221,23 @@ namespace Turnkey
         /// Output of a stamp helper: ready-to-POST URL + canonical JSON body +
         /// stamp header. Matches upstream <c>TSignedRequest</c>.
         /// </summary>
+        /// <remarks>
+        /// Member declaration order matches upstream's runtime object literal
+        /// in <c>public_api.client.ts</c>:
+        /// <code>return { body: body, stamp: stamp, url: fullUrl };</code>
+        /// so JSON-serializing a <c>SignedRequest</c> produces the same key
+        /// order as the upstream TS client.
+        /// </remarks>
         public class SignedRequest
         {
-            [System.Text.Json.Serialization.JsonPropertyName("url")]
-            public string Url { get; set; } = string.Empty;
-
             [System.Text.Json.Serialization.JsonPropertyName("body")]
             public string Body { get; set; } = string.Empty;
 
             [System.Text.Json.Serialization.JsonPropertyName("stamp")]
             public Stamp Stamp { get; set; } = new Stamp();
+
+            [System.Text.Json.Serialization.JsonPropertyName("url")]
+            public string Url { get; set; } = string.Empty;
         }
 
         /// <summary>
