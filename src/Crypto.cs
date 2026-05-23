@@ -16,12 +16,12 @@
 //                                        BuildLabeledInfo / ExtractAndExpand
 //   ts-source/crypto.ts HKDF helpers  -> Crypto.Hkdf nested class
 //                                        (port of @noble/hashes/hkdf)
-//   ts-source/turnkey.ts (subset)     -> DecryptCredentialBundle /
+//   ts-source/turnkey.ts (subset)     -> Curve enum / DecryptCredentialBundle /
 //                                        EncryptPrivateKeyToBundle /
 //                                        DecryptExportBundle /
 //                                        VerifySessionJwtSignature
 //
-// Out of scope (matches the upstream peak-Unity port):
+// Out of scope (matches the peak Unity port):
 //   hpkeAuthEncrypt, quorumKeyEncrypt, extractPrivateKeyFromPKCS8Bytes,
 //   fromDerSignature, toDerSignature
 //   verifyStampSignature, encryptWalletToBundle, encryptToEnclave,
@@ -33,9 +33,9 @@
 //     Newtonsoft.Json's JObject.Parse / JsonConvert.SerializeObject used by
 //     the peak Unity port. Wire bytes are unchanged.
 //   - BouncyCastle 2.5.0 wraps ECDSA / ECDH / AES-GCM / SHA-256 / HMAC /
-//     BigInteger / EC point primitives only. HPKE, HKDF, Tonelli-Shanks,
-//     and bundle parsing logic are direct line-by-line ports of the
-//     upstream TypeScript.
+//     BigInteger / EC point / Ed25519 primitives only. HPKE, HKDF,
+//     Tonelli-Shanks, and bundle parsing logic are direct line-by-line
+//     ports of the upstream TypeScript.
 //   - Newtonsoft.Json dependency dropped.
 //
 // 2.8.8 vs 2.8.9 note:
@@ -46,7 +46,6 @@
 //   but is logically equivalent to 2.8.9 as well.
 
 using System;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Org.BouncyCastle.Asn1;
@@ -123,6 +122,21 @@ namespace Turnkey
 
         #endregion
 
+        #region Curve enum (turnkey.ts type)
+
+        /// <summary>
+        /// EC curve identifier. Mirrors the upstream union type
+        /// <c>"CURVE_P256" | "CURVE_SECP256K1"</c> exposed by
+        /// <see cref="UncompressRawPublicKey(byte[], Curve)"/>.
+        /// </summary>
+        public enum Curve
+        {
+            P256,
+            Secp256k1,
+        }
+
+        #endregion
+
         #region Math (math.ts)
 
         /// <summary>
@@ -134,20 +148,23 @@ namespace Turnkey
             /// Modular square root via Tonelli-Shanks. Equivalent to
             /// upstream <c>math.ts modSqrt</c>.
             /// </summary>
-            /// <param name="x">Value to take the square root of.</param>
+            /// <param name="x">Value to take the square root of (must be non-negative; EC field-element semantics).</param>
             /// <param name="p">Prime modulus.</param>
             /// <returns>One square root of <paramref name="x"/> modulo <paramref name="p"/>.</returns>
+            /// <remarks>
+            /// All known call sites in <c>@turnkey/crypto</c> pass a non-negative
+            /// <paramref name="x"/> derived from an EC field coordinate, where
+            /// BouncyCastle <c>BigInteger.Mod</c> and JS <c>BigInt %</c> agree.
+            /// For symmetry with the JS surface, the result for a negative
+            /// <paramref name="x"/> may differ; this is not exercised in
+            /// production code paths.
+            /// </remarks>
             public static BigInteger ModSqrt(BigInteger x, BigInteger p)
             {
                 if (p.CompareTo(BigInteger.Zero) <= 0)
                 {
                     throw new ArgumentException("p must be positive");
                 }
-
-                // BouncyCastle BigInteger.Mod returns non-negative. Upstream JS
-                // BigInt `%` returns a value with the sign of x. For all known
-                // call sites in @turnkey/crypto x is already non-negative (x is
-                // an EC field-element coordinate), so the two are equivalent.
                 var baseVal = x.Mod(p);
 
                 // p % 4 == 3 fast path (applies to NIST P-256 / P-384 / P-521).
@@ -162,7 +179,6 @@ namespace Turnkey
                     }
                     return squareRoot;
                 }
-
                 throw new InvalidOperationException("unsupported modulus value");
             }
         }
@@ -180,9 +196,7 @@ namespace Turnkey
             private const int HashLen = 32; // SHA-256 output length, bytes.
 
             /// <summary>
-            /// HKDF Extract: produces a 32-byte pseudorandom key from input
-            /// keying material <paramref name="ikm"/> and optional
-            /// <paramref name="salt"/>. RFC 5869 §2.2.
+            /// HKDF Extract. RFC 5869 §2.2.
             /// </summary>
             public static byte[] Extract(byte[] salt, byte[] ikm)
             {
@@ -197,9 +211,7 @@ namespace Turnkey
             }
 
             /// <summary>
-            /// HKDF Expand: derives <paramref name="length"/> bytes of output
-            /// keying material from <paramref name="prk"/> and optional
-            /// context <paramref name="info"/>. RFC 5869 §2.3.
+            /// HKDF Expand. RFC 5869 §2.3.
             /// </summary>
             public static byte[] Expand(byte[] prk, byte[] info, int length)
             {
@@ -280,6 +292,12 @@ namespace Turnkey
             public string? OrganizationId { get; set; }
             public string? UserId { get; set; }
             public string? KeyFormat { get; set; }
+
+            /// <summary>
+            /// Override the production signer key for testing only. Equivalent
+            /// to upstream <c>dangerouslyOverrideSignerPublicKey</c>.
+            /// </summary>
+            public string? DangerouslyOverrideSignerPublicKey { get; set; }
         }
 
         /// <summary>
@@ -293,13 +311,18 @@ namespace Turnkey
             public string? OrganizationId { get; set; }
             public bool ReturnMnemonic { get; set; }
             public string? KeyFormat { get; set; }
+
+            /// <summary>
+            /// Override the production signer key for testing only. Equivalent
+            /// to upstream <c>dangerouslyOverrideSignerPublicKey</c>.
+            /// </summary>
+            public string? DangerouslyOverrideSignerPublicKey { get; set; }
         }
 
         /// <summary>
         /// JSON shape returned by <see cref="FormatHpkeBuf"/>. The two fields
         /// match the upstream <c>JSON.stringify({ encappedPublic, ciphertext })</c>
-        /// output. Property names use the upstream camelCase names verbatim;
-        /// the source-generated context preserves the order.
+        /// output.
         /// </summary>
         public class HpkeBundlePayload
         {
@@ -345,29 +368,20 @@ namespace Turnkey
 
         /// <summary>
         /// Generate a random P-256 key pair. Equivalent to upstream
-        /// <c>crypto.ts generateP256KeyPair</c>.
+        /// <c>crypto.ts generateP256KeyPair</c>. The private key is sampled as
+        /// 32 random bytes (then validated by <c>GetPublicKey</c>); identical
+        /// to the upstream <c>randomBytes(32)</c> + <c>getPublicKey</c> flow.
         /// </summary>
         public static KeyPair GenerateP256KeyPair()
         {
-            var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
-            var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
-
-            var keyGen = new ECKeyPairGenerator();
+            // Match upstream: privateKey = randomBytes(32). The valid scalar
+            // range check is left to GetPublicKey() / EC math (same as upstream).
             var random = new SecureRandom();
-            keyGen.Init(new ECKeyGenerationParameters(domainParams, random));
+            var privateKey = new byte[32];
+            random.NextBytes(privateKey);
 
-            var keyPair = keyGen.GenerateKeyPair();
-            var privateKey = ((ECPrivateKeyParameters)keyPair.Private).D.ToByteArrayUnsigned();
-            var publicKeyCompressed = ((ECPublicKeyParameters)keyPair.Public).Q.GetEncoded(true);
-            var publicKeyUncompressed = ((ECPublicKeyParameters)keyPair.Public).Q.GetEncoded(false);
-
-            // Pad private key to exactly 32 bytes (upstream returns 32-byte hex).
-            if (privateKey.Length < 32)
-            {
-                var padded = new byte[32];
-                Array.Copy(privateKey, 0, padded, 32 - privateKey.Length, privateKey.Length);
-                privateKey = padded;
-            }
+            var publicKeyCompressed = GetPublicKey(privateKey, isCompressed: true);
+            var publicKeyUncompressed = GetPublicKey(privateKey, isCompressed: false);
 
             return new KeyPair
             {
@@ -381,44 +395,47 @@ namespace Turnkey
         /// HPKE-Base mode decrypt (P-256 / HKDF-SHA256 / AES-128-GCM).
         /// Equivalent to upstream <c>crypto.ts hpkeDecrypt</c>.
         /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Wraps any underlying decryption failure with the upstream
+        /// message <c>"Unable to perform hpkeDecrypt: ..."</c>.
+        /// </exception>
         public static byte[] HpkeDecrypt(HpkeDecryptParams parameters)
         {
-            if (parameters == null) throw new ArgumentNullException(nameof(parameters));
-            var ciphertextBuf = parameters.CiphertextBuf
-                                ?? throw new ArgumentNullException(nameof(parameters.CiphertextBuf));
-            var encappedKeyBuf = parameters.EncappedKeyBuf
-                                 ?? throw new ArgumentNullException(nameof(parameters.EncappedKeyBuf));
-            var receiverPriv = parameters.ReceiverPriv
-                               ?? throw new ArgumentNullException(nameof(parameters.ReceiverPriv));
+            try
+            {
+                if (parameters == null) throw new ArgumentNullException(nameof(parameters));
+                var ciphertextBuf = parameters.CiphertextBuf
+                                    ?? throw new ArgumentNullException(nameof(parameters.CiphertextBuf));
+                var encappedKeyBuf = parameters.EncappedKeyBuf
+                                     ?? throw new ArgumentNullException(nameof(parameters.EncappedKeyBuf));
+                var receiverPriv = parameters.ReceiverPriv
+                                   ?? throw new ArgumentNullException(nameof(parameters.ReceiverPriv));
 
-            var receiverPrivBytes = Encoding.Uint8ArrayFromHexString(receiverPriv);
-            var receiverPubBuf = GetPublicKey(receiverPrivBytes, false);
+                var receiverPrivBytes = Encoding.Uint8ArrayFromHexString(receiverPriv);
+                var receiverPubBuf = GetPublicKey(receiverPrivBytes, false);
 
-            // Step 1: AAD
-            var aad = BuildAdditionalAssociatedData(encappedKeyBuf, receiverPubBuf);
+                var aad = BuildAdditionalAssociatedData(encappedKeyBuf, receiverPubBuf);
+                var ss = DeriveSS(encappedKeyBuf, receiverPriv);
+                var kemContext = GetKemContext(encappedKeyBuf, Encoding.Uint8ArrayToHexString(receiverPubBuf));
 
-            // Step 2: ECDH shared secret
-            var ss = DeriveSS(encappedKeyBuf, receiverPriv);
+                var ikm = BuildLabeledIkm(Constants.LABEL_EAE_PRK, ss, Constants.SUITE_ID_1);
+                var info = BuildLabeledInfo(Constants.LABEL_SHARED_SECRET, kemContext, Constants.SUITE_ID_1, 32);
+                var sharedSecret = ExtractAndExpand(Array.Empty<byte>(), ikm, info, 32);
 
-            // Step 3: KEM context
-            var kemContext = GetKemContext(encappedKeyBuf, Encoding.Uint8ArrayToHexString(receiverPubBuf));
+                ikm = BuildLabeledIkm(Constants.LABEL_SECRET, Array.Empty<byte>(), Constants.SUITE_ID_2);
+                info = Constants.AES_KEY_INFO;
+                var key = ExtractAndExpand(sharedSecret, ikm, info, 32);
 
-            // Step 4: HKDF derive shared secret
-            var ikm = BuildLabeledIkm(Constants.LABEL_EAE_PRK, ss, Constants.SUITE_ID_1);
-            var info = BuildLabeledInfo(Constants.LABEL_SHARED_SECRET, kemContext, Constants.SUITE_ID_1, 32);
-            var sharedSecret = ExtractAndExpand(Array.Empty<byte>(), ikm, info, 32);
+                info = Constants.IV_INFO;
+                var iv = ExtractAndExpand(sharedSecret, ikm, info, 12);
 
-            // Step 5: derive AES key
-            ikm = BuildLabeledIkm(Constants.LABEL_SECRET, Array.Empty<byte>(), Constants.SUITE_ID_2);
-            info = Constants.AES_KEY_INFO;
-            var key = ExtractAndExpand(sharedSecret, ikm, info, 32);
-
-            // Step 6: derive IV
-            info = Constants.IV_INFO;
-            var iv = ExtractAndExpand(sharedSecret, ikm, info, 12);
-
-            // Step 7: AES-GCM decrypt
-            return AesGcmDecrypt(ciphertextBuf, key, iv, aad);
+                return AesGcmDecrypt(ciphertextBuf, key, iv, aad);
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException(
+                    "Unable to perform hpkeDecrypt: " + error.Message + " ", error);
+            }
         }
 
         /// <summary>
@@ -427,41 +444,50 @@ namespace Turnkey
         /// </summary>
         /// <returns>
         /// The byte concatenation
-        /// <c>compressed(senderPub) || ciphertext</c>, ready to feed back into
+        /// <c>compressed(senderPub) || ciphertext</c>, ready to feed to
         /// <see cref="FormatHpkeBuf"/> or <see cref="DecryptCredentialBundle"/>.
         /// </returns>
+        /// <exception cref="InvalidOperationException">
+        /// Wraps any underlying failure with the upstream message
+        /// <c>"Unable to perform hpkeEncrypt: ..."</c>.
+        /// </exception>
         public static byte[] HpkeEncrypt(HpkeEncryptParams parameters)
         {
-            if (parameters == null) throw new ArgumentNullException(nameof(parameters));
-            var plainTextBuf = parameters.PlainTextBuf ?? Array.Empty<byte>();
-            var targetKeyBuf = parameters.TargetKeyBuf
-                               ?? throw new ArgumentNullException(nameof(parameters.TargetKeyBuf));
+            try
+            {
+                if (parameters == null) throw new ArgumentNullException(nameof(parameters));
+                var plainTextBuf = parameters.PlainTextBuf ?? Array.Empty<byte>();
+                var targetKeyBuf = parameters.TargetKeyBuf
+                                   ?? throw new ArgumentNullException(nameof(parameters.TargetKeyBuf));
 
-            // Ephemeral sender key pair.
-            var ephemeralKeyPair = GenerateP256KeyPair();
-            var senderPrivBuf = Encoding.Uint8ArrayFromHexString(ephemeralKeyPair.PrivateKey);
-            var senderPubBuf = Encoding.Uint8ArrayFromHexString(ephemeralKeyPair.PublicKeyUncompressed);
+                var ephemeralKeyPair = GenerateP256KeyPair();
+                var senderPrivBuf = Encoding.Uint8ArrayFromHexString(ephemeralKeyPair.PrivateKey);
+                var senderPubBuf = Encoding.Uint8ArrayFromHexString(ephemeralKeyPair.PublicKeyUncompressed);
 
-            var aad = BuildAdditionalAssociatedData(senderPubBuf, targetKeyBuf);
-            var ss = DeriveSS(targetKeyBuf, Encoding.Uint8ArrayToHexString(senderPrivBuf));
-            var kemContext = GetKemContext(senderPubBuf, Encoding.Uint8ArrayToHexString(targetKeyBuf));
+                var aad = BuildAdditionalAssociatedData(senderPubBuf, targetKeyBuf);
+                var ss = DeriveSS(targetKeyBuf, Encoding.Uint8ArrayToHexString(senderPrivBuf));
+                var kemContext = GetKemContext(senderPubBuf, Encoding.Uint8ArrayToHexString(targetKeyBuf));
 
-            var ikm = BuildLabeledIkm(Constants.LABEL_EAE_PRK, ss, Constants.SUITE_ID_1);
-            var info = BuildLabeledInfo(Constants.LABEL_SHARED_SECRET, kemContext, Constants.SUITE_ID_1, 32);
-            var sharedSecret = ExtractAndExpand(Array.Empty<byte>(), ikm, info, 32);
+                var ikm = BuildLabeledIkm(Constants.LABEL_EAE_PRK, ss, Constants.SUITE_ID_1);
+                var info = BuildLabeledInfo(Constants.LABEL_SHARED_SECRET, kemContext, Constants.SUITE_ID_1, 32);
+                var sharedSecret = ExtractAndExpand(Array.Empty<byte>(), ikm, info, 32);
 
-            ikm = BuildLabeledIkm(Constants.LABEL_SECRET, Array.Empty<byte>(), Constants.SUITE_ID_2);
-            info = Constants.AES_KEY_INFO;
-            var key = ExtractAndExpand(sharedSecret, ikm, info, 32);
+                ikm = BuildLabeledIkm(Constants.LABEL_SECRET, Array.Empty<byte>(), Constants.SUITE_ID_2);
+                info = Constants.AES_KEY_INFO;
+                var key = ExtractAndExpand(sharedSecret, ikm, info, 32);
 
-            info = Constants.IV_INFO;
-            var iv = ExtractAndExpand(sharedSecret, ikm, info, 12);
+                info = Constants.IV_INFO;
+                var iv = ExtractAndExpand(sharedSecret, ikm, info, 12);
 
-            var encryptedData = AesGcmEncrypt(plainTextBuf, key, iv, aad);
-
-            // Upstream returns compressedSender || ciphertext.
-            var compressedSenderBuf = CompressRawPublicKey(senderPubBuf);
-            return Encoding.ConcatUint8Arrays(compressedSenderBuf, encryptedData);
+                var encryptedData = AesGcmEncrypt(plainTextBuf, key, iv, aad);
+                var compressedSenderBuf = CompressRawPublicKey(senderPubBuf);
+                return Encoding.ConcatUint8Arrays(compressedSenderBuf, encryptedData);
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException(
+                    "Unable to perform hpkeEncrypt: " + error.Message, error);
+            }
         }
 
         /// <summary>
@@ -474,76 +500,82 @@ namespace Turnkey
         }
 
         /// <summary>
-        /// Compress a 65-byte uncompressed P-256 public key into 33 bytes.
+        /// Compress an uncompressed P-256 public key into 33 bytes.
         /// Equivalent to upstream <c>crypto.ts compressRawPublicKey</c>.
         /// </summary>
+        /// <remarks>
+        /// Upstream uses <c>slice(0, (1 + len) >>> 1)</c> then mutates the
+        /// prefix byte based on the last byte's LSB; for a valid 65-byte
+        /// SEC1 uncompressed key the result is the same 33-byte
+        /// <c>(0x02|0x03) || X</c> output. Defensive validation here only
+        /// rejects malformed input that upstream would also subsequently fail
+        /// on downstream.
+        /// </remarks>
         public static byte[] CompressRawPublicKey(byte[] rawPublicKey)
         {
             if (rawPublicKey == null) throw new ArgumentNullException(nameof(rawPublicKey));
-            if (rawPublicKey.Length != Constants.UNCOMPRESSED_PUB_KEY_LENGTH_BYTES || rawPublicKey[0] != 0x04)
-            {
-                throw new ArgumentException("Invalid uncompressed public key");
-            }
-
-            var x = new byte[32];
-            Array.Copy(rawPublicKey, 1, x, 0, 32);
-
-            // 0x02 if Y is even, 0x03 if Y is odd. Y's parity is determined by
-            // its least-significant bit, which is the last byte's LSB.
-            var lastByte = rawPublicKey[64];
-            var prefix = (byte)((lastByte & 1) == 0 ? 0x02 : 0x03);
-
-            var compressed = new byte[33];
-            compressed[0] = prefix;
-            Array.Copy(x, 0, compressed, 1, 32);
-            return compressed;
+            int len = rawPublicKey.Length;
+            // Upstream: var compressedBytes = rawPublicKey.slice(0, (1 + len) >>> 1);
+            int half = (1 + len) >> 1;
+            var compressedBytes = new byte[half];
+            Array.Copy(rawPublicKey, 0, compressedBytes, 0, half);
+            // Upstream: compressedBytes[0] = 0x02 | (rawPublicKey[len - 1]! & 0x01);
+            compressedBytes[0] = (byte)(0x02 | (rawPublicKey[len - 1] & 0x01));
+            return compressedBytes;
         }
 
         /// <summary>
-        /// Uncompress a 33-byte compressed P-256 public key into 65 bytes.
+        /// Uncompress a 33-byte compressed public key into 65 bytes.
         /// Equivalent to upstream <c>crypto.ts uncompressRawPublicKey</c>.
         /// </summary>
-        public static byte[] UncompressRawPublicKey(byte[] rawPublicKey)
+        /// <param name="rawPublicKey">33-byte compressed key starting with 0x02 or 0x03.</param>
+        /// <param name="curve">Curve identifier; defaults to <see cref="Curve.P256"/>.</param>
+        public static byte[] UncompressRawPublicKey(byte[] rawPublicKey, Curve curve = Curve.P256)
         {
             if (rawPublicKey == null) throw new ArgumentNullException(nameof(rawPublicKey));
-            if (rawPublicKey.Length != CryptoConstants.COMPRESSED_PUBLIC_KEY_SIZE)
+            if (rawPublicKey.Length != 33)
             {
-                throw new ArgumentException(
-                    "Invalid compressed public key size: " + rawPublicKey.Length);
+                throw new ArgumentException("failed to uncompress raw public key: invalid length");
             }
             if (rawPublicKey[0] != 0x02 && rawPublicKey[0] != 0x03)
             {
                 throw new ArgumentException("failed to uncompress raw public key: invalid prefix");
             }
 
-            // 0x03 => odd Y; 0x02 => even Y.
             bool lsb = rawPublicKey[0] == 0x03;
 
-            // x = BigInt("0x" + hex(rawPublicKey[1..33])); upstream parses via hex string.
+            // x = BigInt("0x" + uint8ArrayToHexString(rawPublicKey.subarray(1)));
             var xBytes = new byte[32];
             Array.Copy(rawPublicKey, 1, xBytes, 0, 32);
-            var xHex = Encoding.Uint8ArrayToHexString(xBytes);
-            var x = new BigInteger(xHex, 16);
+            var x = new BigInteger(Encoding.Uint8ArrayToHexString(xBytes), 16);
 
-            // NIST P-256: y^2 = x^3 + a*x + b (mod p), with a = p - 3.
-            var p = new BigInteger(CryptoConstants.P256_P);
-            var b = new BigInteger(CryptoConstants.P256_B, 16);
-            var a = p.Subtract(new BigInteger(CryptoConstants.P256_A_OFFSET));
+            BigInteger p, a, b;
+            if (curve == Curve.P256)
+            {
+                p = new BigInteger(CryptoConstants.P256_P);
+                b = new BigInteger(CryptoConstants.P256_B, 16);
+                a = p.Subtract(new BigInteger(CryptoConstants.P256_A_OFFSET));
+            }
+            else // Secp256k1
+            {
+                p = new BigInteger(
+                    "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", 16);
+                a = BigInteger.ValueOf(0);
+                b = BigInteger.ValueOf(7);
+            }
 
-            // Upstream computes rhs = ((x*x + a) * x + b) % p in a single chain.
+            // rhs = ((x * x + a) * x + b) % p
             var x2 = x.Multiply(x).Mod(p);
             var x2PlusA = x2.Add(a).Mod(p);
             var rhs = x2PlusA.Multiply(x).Add(b).Mod(p);
 
             var y = Math.ModSqrt(rhs, p);
-
-            // Pick the root whose parity matches the requested LSB.
             if (lsb != y.TestBit(0))
             {
                 y = p.Subtract(y).Mod(p);
             }
 
-            // Range check (matches upstream's defensive check).
+            // Defensive range check matches upstream "throw" intent for out-of-range output.
             if (x.SignValue < 0 || x.CompareTo(p) >= 0)
             {
                 throw new InvalidOperationException("x is out of range");
@@ -553,18 +585,12 @@ namespace Turnkey
                 throw new InvalidOperationException("y is out of range");
             }
 
-            // Assemble 0x04 || X || Y (each 32 bytes, big-endian, zero-padded).
             var uncompressed = new byte[65];
             uncompressed[0] = 0x04;
-
             var xHexOut = x.ToString(16).ToLowerInvariant().PadLeft(64, '0');
             var yHexOut = y.ToString(16).ToLowerInvariant().PadLeft(64, '0');
-
-            var xOutputBytes = Encoding.Uint8ArrayFromHexString(xHexOut);
-            var yOutputBytes = Encoding.Uint8ArrayFromHexString(yHexOut);
-
-            Array.Copy(xOutputBytes, 0, uncompressed, 1, 32);
-            Array.Copy(yOutputBytes, 0, uncompressed, 33, 32);
+            Array.Copy(Encoding.Uint8ArrayFromHexString(xHexOut), 0, uncompressed, 1, 32);
+            Array.Copy(Encoding.Uint8ArrayFromHexString(yHexOut), 0, uncompressed, 33, 32);
             return uncompressed;
         }
 
@@ -576,72 +602,83 @@ namespace Turnkey
         public static string FormatHpkeBuf(byte[] encryptedBuf)
         {
             if (encryptedBuf == null) throw new ArgumentNullException(nameof(encryptedBuf));
-            if (encryptedBuf.Length <= CryptoConstants.COMPRESSED_PUBLIC_KEY_SIZE)
-            {
-                throw new ArgumentException("Encrypted buffer too small");
-            }
-
-            var compressedEncappedPublic = new byte[CryptoConstants.COMPRESSED_PUBLIC_KEY_SIZE];
-            Array.Copy(encryptedBuf, 0, compressedEncappedPublic, 0, CryptoConstants.COMPRESSED_PUBLIC_KEY_SIZE);
+            // Upstream: encappedPublic := encryptedBuf.slice(0,33);
+            //           ciphertext     := encryptedBuf.slice(33);
+            // Upstream then uncompressRawPublicKey() the compressed part. If
+            // the input is shorter than 33 bytes that uncompress call would
+            // throw "invalid length". Mirror the same behavior: pass the
+            // raw slice through uncompressRawPublicKey which enforces 33-byte
+            // length itself.
+            int compressedSize = CryptoConstants.COMPRESSED_PUBLIC_KEY_SIZE;
+            int compressedTake = System.Math.Min(compressedSize, encryptedBuf.Length);
+            var compressedEncappedPublic = new byte[compressedTake];
+            Array.Copy(encryptedBuf, 0, compressedEncappedPublic, 0, compressedTake);
 
             var encappedPublicUncompressed = UncompressRawPublicKey(compressedEncappedPublic);
 
-            var ciphertext = new byte[encryptedBuf.Length - CryptoConstants.COMPRESSED_PUBLIC_KEY_SIZE];
-            Array.Copy(encryptedBuf, CryptoConstants.COMPRESSED_PUBLIC_KEY_SIZE, ciphertext, 0, ciphertext.Length);
+            int cipherLen = System.Math.Max(0, encryptedBuf.Length - compressedSize);
+            var ciphertext = new byte[cipherLen];
+            if (cipherLen > 0)
+            {
+                Array.Copy(encryptedBuf, compressedSize, ciphertext, 0, cipherLen);
+            }
 
             var payload = new HpkeBundlePayload
             {
                 EncappedPublic = Encoding.Uint8ArrayToHexString(encappedPublicUncompressed),
                 Ciphertext = Encoding.Uint8ArrayToHexString(ciphertext),
             };
-
             return JsonSerializer.Serialize(payload, TurnkeyJsonContext.Default.HpkeBundlePayload);
         }
 
         #endregion
 
-        #region turnkey.ts public surface (subset matched to Unity / peak usage)
+        #region turnkey.ts public surface
 
         /// <summary>
         /// Decrypt a Turnkey credential bundle.
         /// Equivalent to upstream <c>turnkey.ts decryptCredentialBundle</c>.
         /// </summary>
-        public static string DecryptCredentialBundle(string encryptedCredentialBundle, string targetPrivateKey)
+        /// <exception cref="InvalidOperationException">
+        /// Wraps any decryption / parse failure with the upstream message
+        /// <c>"Error decrypting bundle: ..."</c>.
+        /// </exception>
+        public static string DecryptCredentialBundle(string encryptedCredentialBundle, string embeddedKey)
         {
-            byte[] bundleBytes;
+            if (encryptedCredentialBundle == null)
+                throw new ArgumentNullException(nameof(encryptedCredentialBundle));
+            if (embeddedKey == null)
+                throw new ArgumentNullException(nameof(embeddedKey));
             try
             {
-                bundleBytes = Encoding.Base58CheckDecode(encryptedCredentialBundle);
-            }
-            catch
-            {
-                bundleBytes = Encoding.Base58Decode(encryptedCredentialBundle);
-            }
+                // Upstream uses bs58check.decode exclusively (NO raw bs58 fallback).
+                var bundleBytes = Encoding.Base58CheckDecode(encryptedCredentialBundle);
+                if (bundleBytes.Length <= 33)
+                {
+                    throw new InvalidOperationException(
+                        "Bundle size " + bundleBytes.Length
+                        + " is too low. Expecting a compressed public key (33 bytes) and an encrypted credential.");
+                }
 
-            int compressedSize = CryptoConstants.COMPRESSED_PUBLIC_KEY_SIZE;
-            if (bundleBytes.Length <= compressedSize)
+                var compressedEncappedKeyBuf = new byte[33];
+                Array.Copy(bundleBytes, 0, compressedEncappedKeyBuf, 0, 33);
+                var ciphertextBuf = new byte[bundleBytes.Length - 33];
+                Array.Copy(bundleBytes, 33, ciphertextBuf, 0, ciphertextBuf.Length);
+
+                var encappedKeyBuf = UncompressRawPublicKey(compressedEncappedKeyBuf);
+                var decryptedData = HpkeDecrypt(new HpkeDecryptParams
+                {
+                    CiphertextBuf = ciphertextBuf,
+                    EncappedKeyBuf = encappedKeyBuf,
+                    ReceiverPriv = embeddedKey,
+                });
+                return Encoding.Uint8ArrayToHexString(decryptedData);
+            }
+            catch (Exception error)
             {
                 throw new InvalidOperationException(
-                    "Bundle size " + bundleBytes.Length
-                    + " is too low. Expecting a compressed public key (33 bytes) and an encrypted credential.");
+                    "\"Error decrypting bundle:\", " + error.Message, error);
             }
-
-            var compressedKey = new byte[compressedSize];
-            Array.Copy(bundleBytes, 0, compressedKey, 0, compressedSize);
-
-            var ciphertext = new byte[bundleBytes.Length - compressedSize];
-            Array.Copy(bundleBytes, compressedSize, ciphertext, 0, ciphertext.Length);
-
-            var encappedKey = UncompressRawPublicKey(compressedKey);
-
-            var decryptedData = HpkeDecrypt(new HpkeDecryptParams
-            {
-                CiphertextBuf = ciphertext,
-                EncappedKeyBuf = encappedKey,
-                ReceiverPriv = targetPrivateKey,
-            });
-
-            return Encoding.Uint8ArrayToHexString(decryptedData);
         }
 
         /// <summary>
@@ -660,70 +697,59 @@ namespace Turnkey
             if (string.IsNullOrWhiteSpace(parameters.UserId))
                 throw new ArgumentException("User ID is required", nameof(parameters.UserId));
 
-            try
-            {
-                using var bundleDoc = JsonDocument.Parse(parameters.ImportBundle!);
-                var bundle = bundleDoc.RootElement;
+            using var bundleDoc = JsonDocument.Parse(parameters.ImportBundle!);
+            var parsedImportBundle = bundleDoc.RootElement;
 
-                string? enclaveQuorumPublic = GetStringOrNull(bundle, "enclaveQuorumPublic");
-                string? dataSignature = GetStringOrNull(bundle, "dataSignature");
-                string? signedDataHex = GetStringOrNull(bundle, "data");
+            // Upstream order: decodeKey FIRST, then verify, then check fields.
+            var plainTextBuf = DecodeKey(parameters.PrivateKey!, parameters.KeyFormat);
 
-                if (string.IsNullOrEmpty(enclaveQuorumPublic)
-                    || string.IsNullOrEmpty(dataSignature)
-                    || string.IsNullOrEmpty(signedDataHex))
-                {
-                    throw new InvalidOperationException(
-                        "Invalid import bundle format - missing required fields");
-                }
+            string? enclaveQuorumPublic = GetStringOrNull(parsedImportBundle, "enclaveQuorumPublic");
+            string? dataSignature = GetStringOrNull(parsedImportBundle, "dataSignature");
+            string? signedDataHex = GetStringOrNull(parsedImportBundle, "data");
 
-                VerifyEnclaveSignature(enclaveQuorumPublic!, dataSignature!, signedDataHex!);
+            VerifyEnclaveSignature(
+                enclaveQuorumPublic,
+                dataSignature,
+                signedDataHex,
+                parameters.DangerouslyOverrideSignerPublicKey);
 
-                var signedDataBytes = Encoding.Uint8ArrayFromHexString(signedDataHex!);
-                using var signedDoc = JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(signedDataBytes));
-                var signed = signedDoc.RootElement;
+            var signedDataBytes = Encoding.Uint8ArrayFromHexString(signedDataHex!);
+            using var signedDoc = JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(signedDataBytes));
+            var signedData = signedDoc.RootElement;
 
-                string? orgId = GetStringOrNull(signed, "organizationId");
-                if (!string.Equals(orgId, parameters.OrganizationId, StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException(
-                        "Organization ID mismatch. Expected: " + parameters.OrganizationId
-                        + ", got: " + orgId);
-                }
-
-                string? userId = GetStringOrNull(signed, "userId");
-                if (!string.Equals(userId, parameters.UserId, StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException(
-                        "User ID mismatch. Expected: " + parameters.UserId + ", got: " + userId);
-                }
-
-                string? targetPublic = GetStringOrNull(signed, "targetPublic");
-                if (string.IsNullOrEmpty(targetPublic))
-                {
-                    throw new InvalidOperationException("Import bundle missing targetPublic value");
-                }
-
-                var targetKeyBuf = Encoding.Uint8ArrayFromHexString(targetPublic!);
-                var plainTextBuf = DecodeKey(parameters.PrivateKey!, parameters.KeyFormat);
-
-                var encryptedBuf = HpkeEncrypt(new HpkeEncryptParams
-                {
-                    PlainTextBuf = plainTextBuf,
-                    TargetKeyBuf = targetKeyBuf,
-                });
-
-                return FormatHpkeBuf(encryptedBuf);
-            }
-            catch (Exception err) when (!(err is ArgumentException) && !(err is ArgumentNullException))
+            string? orgId = GetStringOrNull(signedData, "organizationId");
+            if (string.IsNullOrEmpty(orgId) || !string.Equals(orgId, parameters.OrganizationId, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
-                    "Error encrypting private key bundle: " + err.Message, err);
+                    "organization id does not match expected value. Expected: " + parameters.OrganizationId
+                    + ". Found: " + orgId + ".");
             }
+
+            string? userId = GetStringOrNull(signedData, "userId");
+            if (string.IsNullOrEmpty(userId) || !string.Equals(userId, parameters.UserId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "user id does not match expected value. Expected: " + parameters.UserId
+                    + ". Found: " + userId + ".");
+            }
+
+            string? targetPublic = GetStringOrNull(signedData, "targetPublic");
+            if (string.IsNullOrEmpty(targetPublic))
+            {
+                throw new InvalidOperationException("missing \"targetPublic\" in bundle signed data");
+            }
+
+            var targetKeyBuf = Encoding.Uint8ArrayFromHexString(targetPublic!);
+            var privateKeyBundle = HpkeEncrypt(new HpkeEncryptParams
+            {
+                PlainTextBuf = plainTextBuf,
+                TargetKeyBuf = targetKeyBuf,
+            });
+            return FormatHpkeBuf(privateKeyBundle);
         }
 
         /// <summary>
-        /// Decrypt a Turnkey export bundle (legacy or current envelope).
+        /// Decrypt a Turnkey export bundle.
         /// Equivalent to upstream <c>turnkey.ts decryptExportBundle</c>.
         /// </summary>
         public static string DecryptExportBundle(DecryptExportBundleParams parameters)
@@ -739,156 +765,123 @@ namespace Turnkey
             try
             {
                 using var bundleDoc = JsonDocument.Parse(parameters.ExportBundle!);
-                var bundle = bundleDoc.RootElement;
+                var parsedExportBundle = bundleDoc.RootElement;
 
-                string? encappedPublic = GetStringOrNull(bundle, "encappedPublic");
-                string? ciphertextStr = GetStringOrNull(bundle, "ciphertext");
-                string? signature = GetStringOrNull(bundle, "signature");
-                string? signedData = GetStringOrNull(bundle, "signedData");
+                string? enclaveQuorumPublic = GetStringOrNull(parsedExportBundle, "enclaveQuorumPublic");
+                string? dataSignature = GetStringOrNull(parsedExportBundle, "dataSignature");
+                string? dataHex = GetStringOrNull(parsedExportBundle, "data");
 
-                JsonDocument? signedDoc = null;
-                JsonElement signedDataObj = default;
-                bool hasSignedDataObj = false;
+                VerifyEnclaveSignature(
+                    enclaveQuorumPublic,
+                    dataSignature,
+                    dataHex,
+                    parameters.DangerouslyOverrideSignerPublicKey);
 
-                try
+                var signedDataBytes = Encoding.Uint8ArrayFromHexString(dataHex!);
+                using var signedDoc = JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(signedDataBytes));
+                var signedData = signedDoc.RootElement;
+
+                string? bundleOrgId = GetStringOrNull(signedData, "organizationId");
+                if (string.IsNullOrEmpty(bundleOrgId)
+                    || !string.Equals(bundleOrgId, parameters.OrganizationId, StringComparison.Ordinal))
                 {
-                    if (!string.IsNullOrEmpty(signature) && !string.IsNullOrEmpty(signedData))
-                    {
-                        // Legacy envelope: ECDSA over the UTF-8 bytes of `signedData`.
-                        if (!VerifySignature(Constants.PRODUCTION_SIGNER_SIGN_PUBLIC_KEY, signature!, signedData!))
-                        {
-                            throw new InvalidOperationException("Invalid signature on export bundle");
-                        }
-                        signedDoc = JsonDocument.Parse(signedData!);
-                        signedDataObj = signedDoc.RootElement;
-                        hasSignedDataObj = true;
-                        encappedPublic ??= GetStringOrNull(signedDataObj, "encappedPublic");
-                        ciphertextStr ??= GetStringOrNull(signedDataObj, "ciphertext");
-                    }
-                    else
-                    {
-                        // Current envelope: enclave-quorum-signed hex blob.
-                        string? dataHex = GetStringOrNull(bundle, "data");
-                        string? dataSignature = GetStringOrNull(bundle, "dataSignature");
-                        string? enclaveQuorumPublic = GetStringOrNull(bundle, "enclaveQuorumPublic");
+                    throw new InvalidOperationException(
+                        "organization id does not match expected value. Expected: " + parameters.OrganizationId
+                        + ". Found: " + bundleOrgId + ".");
+                }
 
-                        if (string.IsNullOrEmpty(dataHex)
-                            || string.IsNullOrEmpty(dataSignature)
-                            || string.IsNullOrEmpty(enclaveQuorumPublic))
-                        {
-                            throw new InvalidOperationException(
-                                "Invalid export bundle format - missing required fields");
-                        }
+                string? encappedPublic = GetStringOrNull(signedData, "encappedPublic");
+                if (string.IsNullOrEmpty(encappedPublic))
+                {
+                    throw new InvalidOperationException("missing \"encappedPublic\" in bundle signed data");
+                }
+                string? ciphertextStr = GetStringOrNull(signedData, "ciphertext");
 
-                        VerifyEnclaveSignature(enclaveQuorumPublic!, dataSignature!, dataHex!);
+                var encappedKeyBuf = Encoding.Uint8ArrayFromHexString(encappedPublic!);
+                var ciphertextBuf = Encoding.Uint8ArrayFromHexString(ciphertextStr!);
 
-                        var signedDataBytes = Encoding.Uint8ArrayFromHexString(dataHex!);
-                        var signedJson = System.Text.Encoding.UTF8.GetString(signedDataBytes);
-                        signedDoc = JsonDocument.Parse(signedJson);
-                        signedDataObj = signedDoc.RootElement;
-                        hasSignedDataObj = true;
-                        encappedPublic = GetStringOrNull(signedDataObj, "encappedPublic");
-                        ciphertextStr = GetStringOrNull(signedDataObj, "ciphertext");
-                    }
+                var decryptedData = HpkeDecrypt(new HpkeDecryptParams
+                {
+                    CiphertextBuf = ciphertextBuf,
+                    EncappedKeyBuf = encappedKeyBuf,
+                    ReceiverPriv = parameters.EmbeddedKey,
+                });
 
-                    if (hasSignedDataObj)
-                    {
-                        string? bundleOrgId = GetStringOrNull(signedDataObj, "organizationId");
-                        if (!string.IsNullOrEmpty(bundleOrgId)
-                            && !string.Equals(bundleOrgId, parameters.OrganizationId, StringComparison.Ordinal))
-                        {
-                            throw new InvalidOperationException(
-                                "Organization ID mismatch. Expected: " + parameters.OrganizationId
-                                + ", got: " + bundleOrgId);
-                        }
-                    }
-
-                    if (string.IsNullOrEmpty(encappedPublic) || string.IsNullOrEmpty(ciphertextStr))
+                if (string.Equals(parameters.KeyFormat, "SOLANA", StringComparison.Ordinal)
+                    && !parameters.ReturnMnemonic)
+                {
+                    if (decryptedData.Length != 32)
                     {
                         throw new InvalidOperationException(
-                            "Invalid export bundle format - missing HPKE payload");
+                            "invalid private key length. Expected 32 bytes. Got " + decryptedData.Length + ".");
                     }
-
-                    var encappedKeyBuf = Encoding.Uint8ArrayFromHexString(encappedPublic!);
-                    var ciphertextBuf = Encoding.Uint8ArrayFromHexString(ciphertextStr!);
-
-                    var decryptedData = HpkeDecrypt(new HpkeDecryptParams
+                    // Derive Ed25519 public key from the 32-byte seed via BouncyCastle.
+                    var ed25519PrivKey = new Ed25519PrivateKeyParameters(decryptedData, 0);
+                    var publicKeyBytes = ed25519PrivKey.GeneratePublicKey().GetEncoded();
+                    if (publicKeyBytes.Length != 32)
                     {
-                        CiphertextBuf = ciphertextBuf,
-                        EncappedKeyBuf = encappedKeyBuf,
-                        ReceiverPriv = parameters.EmbeddedKey,
-                    });
-
-                    if (parameters.ReturnMnemonic)
-                    {
-                        return Encoding.Uint8ArrayToString(decryptedData);
+                        throw new InvalidOperationException(
+                            "invalid public key length. Expected 32 bytes. Got " + publicKeyBytes.Length + ".");
                     }
-
-                    if (string.Equals(parameters.KeyFormat, "SOLANA", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return Encoding.Base58Encode(decryptedData);
-                    }
-
-                    return Encoding.Uint8ArrayToHexString(decryptedData);
+                    var concatenated = new byte[64];
+                    Array.Copy(decryptedData, 0, concatenated, 0, 32);
+                    Array.Copy(publicKeyBytes, 0, concatenated, 32, 32);
+                    return Encoding.Base58Encode(concatenated);
                 }
-                finally
-                {
-                    signedDoc?.Dispose();
-                }
+
+                var decryptedHex = Encoding.Uint8ArrayToHexString(decryptedData);
+                return parameters.ReturnMnemonic ? Encoding.HexToAscii(decryptedHex) : decryptedHex;
             }
-            catch (Exception err) when (!(err is ArgumentException) && !(err is ArgumentNullException))
+            catch (Exception error)
             {
                 throw new InvalidOperationException(
-                    "Error decrypting export bundle: " + err.Message, err);
+                    "Error decrypting bundle: " + error.Message, error);
             }
         }
 
         /// <summary>
-        /// Verify the ECDSA signature on a Turnkey session JWT against the
-        /// production notarizer's P-256 key.
+        /// Verify the ECDSA signature on a Turnkey session JWT.
         /// Equivalent to upstream <c>turnkey.ts verifySessionJwtSignature</c>.
         /// </summary>
-        public static bool VerifySessionJwtSignature(string jwt)
+        /// <param name="jwt">The JWT to verify.</param>
+        /// <param name="dangerouslyOverrideNotarizerPublicKey">
+        /// Optional hex-encoded uncompressed P-256 public key to verify
+        /// against. Use for tests only; defaults to the production
+        /// notarizer key.
+        /// </param>
+        /// <returns><c>true</c> if the signature is valid for the given key.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the JWT is malformed (missing parts).</exception>
+        public static bool VerifySessionJwtSignature(
+            string jwt,
+            string? dangerouslyOverrideNotarizerPublicKey = null)
         {
-            try
+            if (jwt == null) throw new ArgumentNullException(nameof(jwt));
+
+            string notarizerKeyHex =
+                dangerouslyOverrideNotarizerPublicKey ?? Constants.PRODUCTION_NOTARIZER_SIGN_PUBLIC_KEY;
+
+            var parts = jwt.Split('.');
+            // Upstream: const [a, b, sig] = jwt.split("."); if (!sig) throw new Error(...)
+            if (parts.Length < 3 || string.IsNullOrEmpty(parts[2]))
             {
-                if (string.IsNullOrEmpty(jwt))
-                {
-                    return false;
-                }
-                var parts = jwt.Split('.');
-                if (parts.Length != 3)
-                {
-                    return false;
-                }
-
-                string headerB64 = parts[0];
-                string payloadB64 = parts[1];
-                string signatureB64 = parts[2];
-                string signingInput = headerB64 + "." + payloadB64;
-
-                // Upstream: double-SHA-256 of the signing input. The signing
-                // algorithm is "NONEwithECDSA" with the pre-hashed digest fed in.
-                byte[] msgDigest;
-                using (var sha256 = SHA256.Create())
-                {
-                    var h1 = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(signingInput));
-                    msgDigest = sha256.ComputeHash(h1);
-                }
-
-                byte[] signature = Base64UrlDecode(signatureB64);
-                if (signature.Length != 64)
-                {
-                    return false;
-                }
-
-                var publicKey = Encoding.Uint8ArrayFromHexString(Constants.PRODUCTION_NOTARIZER_SIGN_PUBLIC_KEY);
-                return VerifyP256RawSignature(publicKey, signature, msgDigest);
+                throw new InvalidOperationException("invalid JWT: need 3 parts");
             }
-            catch
+
+            string headerB64 = parts[0];
+            string payloadB64 = parts[1];
+            string signatureB64 = parts[2];
+            string signingInput = headerB64 + "." + payloadB64;
+
+            byte[] msgDigest;
+            using (var sha256 = SHA256.Create())
             {
-                return false;
+                var h1 = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(signingInput));
+                msgDigest = sha256.ComputeHash(h1);
             }
+
+            byte[] signature = Base64UrlDecode(signatureB64);
+            var publicKey = Encoding.Uint8ArrayFromHexString(notarizerKeyHex);
+            return VerifyP256RawSignature(publicKey, signature, msgDigest);
         }
 
         #endregion
@@ -930,14 +923,11 @@ namespace Turnkey
 
         private static byte[] BuildLabeledIkm(byte[] label, byte[] ikm, byte[] suiteId)
         {
-            // Upstream `buildLabeledIkm` returns HPKE_VERSION || suiteId || label || ikm.
             return Encoding.ConcatUint8Arrays(Constants.HPKE_VERSION, suiteId, label, ikm);
         }
 
         private static byte[] BuildLabeledInfo(byte[] label, byte[] info, byte[] suiteId, int len)
         {
-            // Upstream layout: [0, len, ...HPKE_VERSION, ...suiteId, ...label, ...info].
-            // suiteIdStartIndex == 2 + HPKE_VERSION.Length == 9.
             const int suiteIdStartIndex = 9;
             var ret = new byte[suiteIdStartIndex + suiteId.Length + label.Length + info.Length];
 
@@ -982,9 +972,6 @@ namespace Turnkey
 
         private static byte[] Base64UrlDecode(string input)
         {
-            // Strict base64url-decoder for JWT signatures. Upstream uses
-            // Buffer.from(input, "base64url") in Node which is strict on
-            // characters; we mirror that here (no lenient atob).
             var output = input.Replace('-', '+').Replace('_', '/');
             switch (output.Length % 4)
             {
@@ -996,6 +983,12 @@ namespace Turnkey
 
         private static bool VerifyP256RawSignature(byte[] publicKeyBytes, byte[] signatureRaw, byte[] messageDigest)
         {
+            // Upstream noble p256.verify accepts r||s of length 64. Anything
+            // else is an invalid signature; return false.
+            if (signatureRaw.Length != 64)
+            {
+                return false;
+            }
             try
             {
                 var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
@@ -1004,12 +997,10 @@ namespace Turnkey
                 var point = curve.Curve.DecodePoint(publicKeyBytes);
                 var publicKeyParams = new ECPublicKeyParameters(point, domainParams);
 
-                // Convert raw r||s (64 bytes) to DER-encoded sequence.
                 var r = new BigInteger(1, signatureRaw, 0, 32);
                 var s = new BigInteger(1, signatureRaw, 32, 32);
                 byte[] derSignature = new DerSequence(new DerInteger(r), new DerInteger(s)).GetDerEncoded();
 
-                // The message is already a digest; use NONEwithECDSA.
                 var signer = SignerUtilities.GetSigner("NONEwithECDSA");
                 signer.Init(false, publicKeyParams);
                 signer.BlockUpdate(messageDigest, 0, messageDigest.Length);
@@ -1021,18 +1012,35 @@ namespace Turnkey
             }
         }
 
-        private static void VerifyEnclaveSignature(string enclaveQuorumPublic, string signatureHex, string signedDataHex)
+        /// <summary>
+        /// Equivalent to upstream <c>turnkey.ts verifyEnclaveSignature</c>.
+        /// Throws on mismatch / failed verification.
+        /// </summary>
+        private static void VerifyEnclaveSignature(
+            string? enclaveQuorumPublic,
+            string? signatureHex,
+            string? signedDataHex,
+            string? dangerouslyOverrideSignerPublicKey)
         {
-            if (!string.Equals(enclaveQuorumPublic, Constants.PRODUCTION_SIGNER_SIGN_PUBLIC_KEY, StringComparison.OrdinalIgnoreCase))
+            string expectedSignerPublicKey =
+                dangerouslyOverrideSignerPublicKey ?? Constants.PRODUCTION_SIGNER_SIGN_PUBLIC_KEY;
+
+            if (!string.Equals(enclaveQuorumPublic, expectedSignerPublicKey, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
-                    "Signer key " + enclaveQuorumPublic + " is not recognized. Expected: "
-                    + Constants.PRODUCTION_SIGNER_SIGN_PUBLIC_KEY);
+                    "expected signer key " + expectedSignerPublicKey
+                    + " does not match signer key from bundle: " + enclaveQuorumPublic);
             }
 
-            var publicKeyBytes = Encoding.Uint8ArrayFromHexString(Constants.PRODUCTION_SIGNER_SIGN_PUBLIC_KEY);
-            var signatureBytes = Encoding.Uint8ArrayFromHexString(signatureHex);
-            var messageBytes = Encoding.Uint8ArrayFromHexString(signedDataHex);
+            if (string.IsNullOrEmpty(signatureHex) || string.IsNullOrEmpty(signedDataHex))
+            {
+                throw new InvalidOperationException(
+                    "failed to verify enclave signature: missing signature or data");
+            }
+
+            var publicKeyBytes = Encoding.Uint8ArrayFromHexString(expectedSignerPublicKey);
+            var signatureBytes = Encoding.Uint8ArrayFromHexString(signatureHex!);
+            var messageBytes = Encoding.Uint8ArrayFromHexString(signedDataHex!);
 
             var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
             var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
@@ -1045,51 +1053,33 @@ namespace Turnkey
 
             if (!signer.VerifySignature(signatureBytes))
             {
-                throw new InvalidOperationException("Failed to verify enclave signature");
+                throw new InvalidOperationException("failed to verify enclave signature");
             }
         }
 
-        private static bool VerifySignature(string publicKeyHex, string signatureHex, string message)
-        {
-            try
-            {
-                var publicKeyBytes = Encoding.Uint8ArrayFromHexString(publicKeyHex);
-                var signatureBytes = Encoding.Uint8ArrayFromHexString(signatureHex);
-                var messageBytes = System.Text.Encoding.UTF8.GetBytes(message);
-
-                var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
-                var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
-
-                var point = curve.Curve.DecodePoint(publicKeyBytes);
-                var publicKeyParams = new ECPublicKeyParameters(point, domainParams);
-
-                var signer = SignerUtilities.GetSigner("SHA-256withECDSA");
-                signer.Init(false, publicKeyParams);
-                signer.BlockUpdate(messageBytes, 0, messageBytes.Length);
-                return signer.VerifySignature(signatureBytes);
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
+        /// <summary>
+        /// Equivalent to upstream <c>turnkey.ts decodeKey</c>. Default and
+        /// unknown <paramref name="keyFormat"/> values fall back to hex
+        /// parsing exactly like upstream <c>default:</c> branch.
+        /// </summary>
         private static byte[] DecodeKey(string privateKey, string? keyFormat)
         {
-            if (string.Equals(keyFormat, "SOLANA", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(keyFormat, "SOLANA", StringComparison.Ordinal))
             {
                 var decoded = Encoding.Base58Decode(privateKey);
                 if (decoded.Length != 64)
                 {
                     throw new InvalidOperationException(
-                        "Invalid Solana private key length. Expected 64 bytes, got " + decoded.Length + ".");
+                        "invalid key length. Expected 64 bytes. Got " + decoded.Length + ".");
                 }
-                var privateKeyBytes = new byte[32];
-                Array.Copy(decoded, 0, privateKeyBytes, 0, 32);
-                return privateKeyBytes;
+                var first32 = new byte[32];
+                Array.Copy(decoded, 0, first32, 0, 32);
+                return first32;
             }
-
-            string normalized = privateKey.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            // HEXADECIMAL (and unknown fallback). Upstream "default:" branch
+            // also accepts the unknown case by falling through to hex parsing
+            // (it logs a warn; this port silently matches the behavior).
+            string normalized = privateKey.StartsWith("0x", StringComparison.Ordinal)
                 ? privateKey.Substring(2)
                 : privateKey;
             return Encoding.Uint8ArrayFromHexString(normalized);
@@ -1109,10 +1099,6 @@ namespace Turnkey
             {
                 return null;
             }
-            // Upstream uses ?.toString() which for a non-string JToken returns
-            // its string representation. For Turnkey bundles every queried
-            // field is a string; treat non-string values as null so callers
-            // see the same "missing field" path they would in JS.
             return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
         }
 

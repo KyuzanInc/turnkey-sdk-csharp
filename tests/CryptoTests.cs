@@ -198,21 +198,18 @@ namespace Turnkey.Tests
         }
 
         [Fact]
-        public void CompressRawPublicKey_InvalidPrefix_Throws()
+        public void CompressRawPublicKey_Permissive_OnAnyLength()
         {
-            var raw = new byte[65];
-            raw[0] = 0x05;
-            Action act = () => Crypto.CompressRawPublicKey(raw);
-            act.Should().Throw<ArgumentException>();
-        }
-
-        [Fact]
-        public void CompressRawPublicKey_WrongLength_Throws()
-        {
+            // Upstream behavior: slice + LSB-flip regardless of input shape.
+            // For a 65-byte uncompressed key we produce a 33-byte compressed key.
+            // For other lengths we produce a different-length output that
+            // upstream would also produce. Confirm we no longer throw on
+            // malformed input.
             var raw = new byte[64];
             raw[0] = 0x04;
+            raw[63] = 0x01;
             Action act = () => Crypto.CompressRawPublicKey(raw);
-            act.Should().Throw<ArgumentException>();
+            act.Should().NotThrow();
         }
 
         [Fact]
@@ -232,7 +229,7 @@ namespace Turnkey.Tests
             compressed[0] = 0x02;
             Action act = () => Crypto.UncompressRawPublicKey(compressed);
             act.Should().Throw<ArgumentException>()
-               .WithMessage("Invalid compressed public key size: 32");
+               .WithMessage("failed to uncompress raw public key: invalid length");
         }
 
         // ============================================================
@@ -409,9 +406,12 @@ namespace Turnkey.Tests
         [Fact]
         public void FormatHpkeBuf_TooSmall_Throws()
         {
+            // Upstream passes the slice to uncompressRawPublicKey which
+            // throws "failed to uncompress raw public key: invalid length"
+            // when the buffer is shorter than 33 bytes.
             Action act = () => Crypto.FormatHpkeBuf(new byte[10]);
             act.Should().Throw<ArgumentException>()
-               .WithMessage("Encrypted buffer too small");
+               .WithMessage("failed to uncompress raw public key: invalid length");
         }
 
         // ============================================================
@@ -419,15 +419,20 @@ namespace Turnkey.Tests
         // ============================================================
 
         [Fact]
-        public void VerifySessionJwtSignature_Empty_ReturnsFalse()
+        public void VerifySessionJwtSignature_Empty_Throws()
         {
-            Crypto.VerifySessionJwtSignature(string.Empty).Should().BeFalse();
+            // Upstream: throws "invalid JWT: need 3 parts" when signature part is missing.
+            Action act = () => Crypto.VerifySessionJwtSignature(string.Empty);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: need 3 parts");
         }
 
         [Fact]
-        public void VerifySessionJwtSignature_WrongPartCount_ReturnsFalse()
+        public void VerifySessionJwtSignature_WrongPartCount_Throws()
         {
-            Crypto.VerifySessionJwtSignature("just.two").Should().BeFalse();
+            Action act = () => Crypto.VerifySessionJwtSignature("just.two");
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: need 3 parts");
         }
 
         [Fact]
@@ -453,6 +458,24 @@ namespace Turnkey.Tests
         }
 
         // ============================================================
+        // Curve.Secp256k1 — UncompressRawPublicKey
+        // ============================================================
+
+        [Fact]
+        public void UncompressRawPublicKey_Secp256k1_Roundtrip()
+        {
+            // secp256k1 generator point compressed = 02 79be667e f9dcbbac 55a06295 ce870b07
+            //                                       029bfcdb 2dce28d9 59f2815b 16f81798
+            byte[] compressed = Encoding.Uint8ArrayFromHexString(
+                "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
+            byte[] uncompressed = Crypto.UncompressRawPublicKey(compressed, Crypto.Curve.Secp256k1);
+            uncompressed.Should().HaveCount(65);
+            uncompressed[0].Should().Be(0x04);
+            // Y coordinate of G must be even (prefix was 0x02).
+            (uncompressed[64] & 1).Should().Be(0);
+        }
+
+        // ============================================================
         // Bundle helpers — negative paths only (positive paths require
         // Turnkey-signed sample bundles which we do not have here)
         // ============================================================
@@ -460,10 +483,23 @@ namespace Turnkey.Tests
         [Fact]
         public void DecryptCredentialBundle_BundleTooSmall_Throws()
         {
-            // Base58 of "0" gives a tiny payload.
-            string tiny = Encoding.Base58Encode(new byte[] { 0x01, 0x02, 0x03 });
+            // Base58Check of a small (<33 byte) payload should still decode (with valid checksum)
+            // but trigger the size guard. Use Base58Check encode so DecryptCredentialBundle's
+            // bs58check decode succeeds, then it should fail on the size check.
+            string tiny = Encoding.Base58CheckEncode(new byte[] { 0x01, 0x02, 0x03 });
             Action act = () => Crypto.DecryptCredentialBundle(tiny, new string('1', 64));
-            act.Should().Throw<Exception>();
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("*Error decrypting bundle*");
+        }
+
+        [Fact]
+        public void DecryptCredentialBundle_RawBase58_Rejected()
+        {
+            // Upstream uses bs58check.decode exclusively. A plain base58 input
+            // (no checksum) must NOT be accepted.
+            string rawBs58 = Encoding.Base58Encode(new byte[40]);
+            Action act = () => Crypto.DecryptCredentialBundle(rawBs58, new string('1', 64));
+            act.Should().Throw<InvalidOperationException>();
         }
 
         [Fact]
