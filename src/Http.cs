@@ -25,8 +25,18 @@
 //   - Body JSON serialized via TurnkeyJsonContext (source-gen, no
 //     reflection) so that the bytes hashed by ApiKeyStamper.Stamp are
 //     deterministic and IL2CPP-safe.
-//   - Endpoint base URL is "https://api.turnkey.com" (matches the peak
-//     Unity port). A configurable base URL is out of scope for v0.1.0.
+//   - Default base URL = "https://api.turnkey.com". Each factory call
+//     accepts an optional `baseUrl` for staging/mock endpoints, matching
+//     upstream `THttpConfig.baseUrl`.
+//
+// JSON property ordering note:
+//   Upstream's `stampX(input)` calls JSON.stringify(input) which preserves
+//   the caller's object key insertion order — NOT the order declared in
+//   public_api.types.ts. Field declaration order in the C# DTOs therefore
+//   determines the emitted JSON byte order. The order chosen here mirrors
+//   the peak Unity port. Wire format works because the same bytes are
+//   both signed (by ApiKeyStamper.Stamp) and sent (as body), so the
+//   signature always verifies against the exact body delivered.
 
 using System;
 using System.Text.Json;
@@ -40,13 +50,19 @@ namespace Turnkey
     /// </summary>
     public class Http
     {
-        private const string BaseUrl = "https://api.turnkey.com";
+        /// <summary>
+        /// Default Turnkey API base URL. Overridable per factory call for
+        /// staging / mock endpoints. Matches upstream <c>THttpConfig.baseUrl</c>.
+        /// </summary>
+        public const string DefaultBaseUrl = "https://api.turnkey.com";
 
         private readonly ApiKeyStamper _stamper;
+        private readonly string _baseUrl;
 
-        private Http(ApiKeyStamper stamper)
+        private Http(ApiKeyStamper stamper, string baseUrl)
         {
             _stamper = stamper ?? throw new ArgumentNullException(nameof(stamper));
+            _baseUrl = baseUrl;
         }
 
         /// <summary>
@@ -62,7 +78,11 @@ namespace Turnkey
         /// Hex-encoded target P-256 private key (the receiver of the HPKE
         /// envelope).
         /// </param>
-        public static Http GetHttpClient(string encryptedCredentialBundle, string targetPrivateKey)
+        /// <param name="baseUrl">Optional Turnkey API base URL. Defaults to <see cref="DefaultBaseUrl"/>.</param>
+        public static Http GetHttpClient(
+            string encryptedCredentialBundle,
+            string targetPrivateKey,
+            string baseUrl = DefaultBaseUrl)
         {
             if (string.IsNullOrEmpty(encryptedCredentialBundle))
             {
@@ -82,14 +102,18 @@ namespace Turnkey
             var normalizedPrivateKey = Encoding.Uint8ArrayToHexString(apiPrivateKeyBytes);
             var apiPublicKey = Encoding.Uint8ArrayToHexString(apiPublicKeyBytes);
 
-            return new Http(new ApiKeyStamper(apiPublicKey, normalizedPrivateKey));
+            return new Http(new ApiKeyStamper(apiPublicKey, normalizedPrivateKey), baseUrl);
         }
 
         /// <summary>
         /// Create an <see cref="Http"/> client directly from a target private
         /// key (the OTP session flow where the session key is already known).
         /// </summary>
-        public static Http FromTargetPrivateKey(string targetPrivateKey)
+        /// <param name="targetPrivateKey">Hex-encoded target P-256 private key.</param>
+        /// <param name="baseUrl">Optional Turnkey API base URL. Defaults to <see cref="DefaultBaseUrl"/>.</param>
+        public static Http FromTargetPrivateKey(
+            string targetPrivateKey,
+            string baseUrl = DefaultBaseUrl)
         {
             if (string.IsNullOrWhiteSpace(targetPrivateKey))
             {
@@ -108,7 +132,7 @@ namespace Turnkey
             var publicKeyBytes = Crypto.GetPublicKey(privateKeyBytes, isCompressed: true);
             var publicKeyHex = Encoding.Uint8ArrayToHexString(publicKeyBytes);
 
-            return new Http(new ApiKeyStamper(publicKeyHex, normalizedPrivateKey));
+            return new Http(new ApiKeyStamper(publicKeyHex, normalizedPrivateKey), baseUrl);
         }
 
         // ===== Activity stampers =====
@@ -124,7 +148,7 @@ namespace Turnkey
             }
             var body = new WhoamiRequestBody { OrganizationId = organizationId };
             return CreateSignedRequest(
-                BaseUrl + "/public/v1/query/whoami",
+                _baseUrl + "/public/v1/query/whoami",
                 JsonSerializer.Serialize(body, TurnkeyJsonContext.Default.WhoamiRequestBody));
         }
 
@@ -135,7 +159,7 @@ namespace Turnkey
         {
             if (body == null) throw new ArgumentNullException(nameof(body));
             return CreateSignedRequest(
-                BaseUrl + "/public/v1/submit/init_import_private_key",
+                _baseUrl + "/public/v1/submit/init_import_private_key",
                 JsonSerializer.Serialize(body, TurnkeyJsonContext.Default.InitImportPrivateKeyRequestBody));
         }
 
@@ -146,7 +170,7 @@ namespace Turnkey
         {
             if (body == null) throw new ArgumentNullException(nameof(body));
             return CreateSignedRequest(
-                BaseUrl + "/public/v1/submit/import_private_key",
+                _baseUrl + "/public/v1/submit/import_private_key",
                 JsonSerializer.Serialize(body, TurnkeyJsonContext.Default.ImportPrivateKeyRequestBody));
         }
 
@@ -157,7 +181,7 @@ namespace Turnkey
         {
             if (body == null) throw new ArgumentNullException(nameof(body));
             return CreateSignedRequest(
-                BaseUrl + "/public/v1/submit/export_private_key",
+                _baseUrl + "/public/v1/submit/export_private_key",
                 JsonSerializer.Serialize(body, TurnkeyJsonContext.Default.ExportPrivateKeyRequestBody));
         }
 
@@ -168,7 +192,7 @@ namespace Turnkey
         {
             if (body == null) throw new ArgumentNullException(nameof(body));
             return CreateSignedRequest(
-                BaseUrl + "/public/v1/submit/export_wallet_account",
+                _baseUrl + "/public/v1/submit/export_wallet_account",
                 JsonSerializer.Serialize(body, TurnkeyJsonContext.Default.ExportWalletAccountRequestBody));
         }
 
@@ -236,6 +260,14 @@ namespace Turnkey
 
             [System.Text.Json.Serialization.JsonPropertyName("parameters")]
             public InitImportPrivateKeyParameters Parameters { get; set; } = new InitImportPrivateKeyParameters();
+
+            /// <summary>
+            /// Optional upstream <c>generateAppProofs</c> opt-in. Omitted from
+            /// JSON when null (matches upstream optional behavior).
+            /// </summary>
+            [System.Text.Json.Serialization.JsonPropertyName("generateAppProofs")]
+            [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+            public bool? GenerateAppProofs { get; set; }
         }
 
         public class InitImportPrivateKeyParameters
@@ -257,6 +289,10 @@ namespace Turnkey
 
             [System.Text.Json.Serialization.JsonPropertyName("parameters")]
             public ImportPrivateKeyParameters Parameters { get; set; } = new ImportPrivateKeyParameters();
+
+            [System.Text.Json.Serialization.JsonPropertyName("generateAppProofs")]
+            [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+            public bool? GenerateAppProofs { get; set; }
         }
 
         public class ImportPrivateKeyParameters
@@ -290,6 +326,10 @@ namespace Turnkey
 
             [System.Text.Json.Serialization.JsonPropertyName("parameters")]
             public ExportPrivateKeyParameters Parameters { get; set; } = new ExportPrivateKeyParameters();
+
+            [System.Text.Json.Serialization.JsonPropertyName("generateAppProofs")]
+            [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+            public bool? GenerateAppProofs { get; set; }
         }
 
         public class ExportPrivateKeyParameters
@@ -314,6 +354,10 @@ namespace Turnkey
 
             [System.Text.Json.Serialization.JsonPropertyName("parameters")]
             public ExportWalletAccountParameters Parameters { get; set; } = new ExportWalletAccountParameters();
+
+            [System.Text.Json.Serialization.JsonPropertyName("generateAppProofs")]
+            [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+            public bool? GenerateAppProofs { get; set; }
         }
 
         public class ExportWalletAccountParameters
