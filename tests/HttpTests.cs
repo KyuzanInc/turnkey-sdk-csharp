@@ -181,8 +181,9 @@ namespace Turnkey.Tests
         [Fact]
         public void Stamp_HeaderValueDecodesAndVerifies()
         {
-            // End-to-end: stamp a whoami request and verify the X-Stamp header
-            // decodes to a stamp object that crypto-verifies over the body.
+            // End-to-end wire-format check: stamp a whoami request, decode the
+            // X-Stamp header, parse the JSON, and crypto-verify the DER
+            // signature over SHA-256(body) under the API public key.
             var http = MakeClient();
             var req = http.StampGetWhoami("org-id");
 
@@ -193,6 +194,23 @@ namespace Turnkey.Tests
             root.GetProperty("scheme").GetString().Should().Be("SIGNATURE_SCHEME_TK_API_P256");
             string signatureHex = root.GetProperty("signature").GetString()!;
             signatureHex.Should().StartWith("30"); // DER SEQUENCE
+
+            // Verify the signature against SHA-256(body) under the API public key.
+            byte[] bodyBytes = System.Text.Encoding.UTF8.GetBytes(req.Body);
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            byte[] digest = sha.ComputeHash(bodyBytes);
+
+            var curve = Org.BouncyCastle.Asn1.X9.ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
+            var domain = new Org.BouncyCastle.Crypto.Parameters.ECDomainParameters(
+                curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
+            byte[] pubBytes = Encoding.Uint8ArrayFromHexString(FixturePublicKey);
+            var publicKey = new Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters(
+                curve.Curve.DecodePoint(pubBytes), domain);
+
+            var signer = Org.BouncyCastle.Security.SignerUtilities.GetSigner("NONEwithECDSA");
+            signer.Init(false, publicKey);
+            signer.BlockUpdate(digest, 0, digest.Length);
+            signer.VerifySignature(Encoding.Uint8ArrayFromHexString(signatureHex)).Should().BeTrue();
         }
 
         [Fact]
