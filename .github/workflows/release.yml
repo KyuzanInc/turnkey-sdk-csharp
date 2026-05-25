@@ -61,7 +61,7 @@ jobs:
           set -euo pipefail
           echo "sha=$(git rev-parse "${TAG}^{commit}")" >> "$GITHUB_OUTPUT"
 
-      - name: Verify tag commit is reachable from origin/main
+      - name: Verify tag commit is contained in main
         env:
           GH_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
           OWNER_REPO: ${{ github.repository }}
