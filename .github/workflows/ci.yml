@@ -66,7 +66,7 @@ jobs:
           output: both
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-report
@@ -97,7 +97,7 @@ jobs:
           grep -q 'LICENSE'   /tmp/contents.txt
           grep -q 'NOTICE'    /tmp/contents.txt
       - name: Upload .nupkg + .snupkg artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: nupkgs
           path: ./artifacts/**
