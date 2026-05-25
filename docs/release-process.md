@@ -35,7 +35,12 @@ draft Release body.
 `release.yml` runs the following gates in order:
 
 1. Strict SemVer tag check.
-2. `git merge-base --is-ancestor` against `origin/main`.
+2. Ancestor check via GitHub compare API
+   (`gh api compare/main...<tag_sha>`); accepts `behind` or
+   `identical`, rejects anything else. (Not `git merge-base` —
+   `actions/checkout` runs with `persist-credentials: false`, so
+   `git fetch origin main` on a private repo would fail without
+   a persisted credential.)
 3. Restore + build + full test suite. All tests must pass.
 4. Pack (`.nupkg` + `.snupkg` with deterministic settings).
 5. Strict path validation of the `.nupkg` and `.snupkg` contents.
