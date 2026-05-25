@@ -101,9 +101,9 @@ the audit trail for the broken bits.
 ## 4. Same-tag reruns
 
 If `release.yml` failed partway (transient registry error, runner
-crash, etc.), you can re-trigger the same Release without bumping the
-version. The workflow detects the partial-publish state via two
-invariants and decides what to do:
+crash, etc.), you can re-trigger the same workflow run without bumping
+the version. The workflow detects the partial-publish state and
+decides what to do:
 
 | State | Registry has `vX.Y.Z` | Release has assets | Workflow does |
 |---|---|---|---|
@@ -114,9 +114,21 @@ invariants and decides what to do:
 | Tamper: registry has DIFFERENT bytes | Yes (mismatch) | — | **FAIL**, bump version |
 | Tamper: Release asset has DIFFERENT bytes | — | Yes (mismatch) | **FAIL**, bump version |
 
-To re-trigger a Release, use the GitHub UI's "Edit release → Update
-release" button without changing the tag, or run the workflow via
-`workflow_dispatch` if you add that trigger separately.
+To re-trigger the Release workflow without re-publishing the Release:
+
+- **Preferred**: open the failed Actions run page and click
+  **"Re-run failed jobs"** (or **"Re-run all jobs"**). The re-run uses
+  the original `release: published` event payload, so `release.yml`
+  runs again with the same tag. This is the only documented mechanism
+  that re-fires `release: published` for an already-published Release.
+
+- **NOT a re-trigger**: clicking "Edit release → Update release" in
+  the GitHub UI fires `release: edited`, NOT `release: published`, so
+  the publish workflow does not re-run.
+
+- **Never** delete and re-create the Release with the same tag — the
+  registry-byte invariant will refuse the publish anyway, and you
+  lose the audit trail.
 
 ---
 
@@ -128,9 +140,12 @@ GitHub Packages NuGet requires authentication even for org members
 ### One-time setup (per developer)
 
 ```bash
-# 1. Create a PAT (classic) at github.com/settings/tokens with
-#    `read:packages` scope, OR a fine-grained PAT with read access to
-#    `KyuzanInc/turnkey-sdk-csharp`.
+# 1. Create a PAT (classic) at github.com/settings/tokens with the
+#    `read:packages` scope. Use classic PAT — GitHub's NuGet registry
+#    docs prescribe classic PAT for direct package authentication.
+#    Fine-grained PATs are not officially supported for the NuGet
+#    registry by GitHub at the time of writing; if you have one, it
+#    may or may not work depending on registry behaviour.
 
 # 2. Add the source:
 dotnet nuget add source \

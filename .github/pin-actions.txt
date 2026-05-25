@@ -37,11 +37,16 @@ release-drafter/release-drafter
   used_in:        release-drafter-draft.yml (root action)
                   release-drafter-autolabel.yml (autolabeler subpath)
   source_citation: |
-    The autolabeler reads `pull_request.title` and `pull_request.body`
-    from the event payload and does not filter by github.event.action,
-    so it accepts `opened, reopened, synchronize, edited` events
-    uniformly. See:
-      https://github.com/release-drafter/release-drafter/blob/da8b9b696abad2ad997580e49f4c1c2e03cc2bd2/lib/labeler.js
-    (search for `pull_request.title` to confirm the unfiltered title-
-    based matching). This citation is the auditable proof per the
-    PLAN-RELEASE-WORKFLOW.md "v11 changes" entry.
+    Exact line proving `pull_request: edited` is handled by the
+    autolabeler (per PLAN-RELEASE-WORKFLOW.md acceptance):
+      src/actions/autolabeler/main.ts:70
+      "if (matcher.test(payload.pull_request.title)) {"
+      https://github.com/release-drafter/release-drafter/blob/da8b9b696abad2ad997580e49f4c1c2e03cc2bd2/src/actions/autolabeler/main.ts#L70
+    Above that, the early-exit at main.ts:17-22 only filters
+    `context.eventName !== 'pull_request' && !== 'pull_request_target'`.
+    It does NOT filter on `context.payload.action`, so any
+    `pull_request` event type (opened, reopened, synchronize, edited,
+    ...) reaches the title matcher. For `edited` events, GitHub sends
+    the post-edit title in the payload (see
+    https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request),
+    so the matcher operates on the new title.

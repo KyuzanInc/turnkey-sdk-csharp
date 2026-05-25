@@ -30,7 +30,11 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
           fetch-depth: 0
-          persist-credentials: true
+          # Drop checkout token from .git/config after checkout — later
+          # git/gh calls pass `GH_TOKEN` explicitly and never authenticate
+          # via the persisted checkout credential, so persisting it
+          # extends the token's blast radius without benefit.
+          persist-credentials: false
 
       - name: Parse + validate strict SemVer 2.0.0 tag
         id: ver
