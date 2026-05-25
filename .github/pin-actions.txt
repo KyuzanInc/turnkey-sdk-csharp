@@ -1,0 +1,52 @@
+# Third-party action pin manifest — release-related workflows only
+#
+# Every action used by release.yml, release-drafter-draft.yml,
+# release-drafter-autolabel.yml, and pr-title-lint.yml is pinned to a
+# full commit SHA. This file records the human-readable tag for each
+# pinned SHA so reviewers can verify pins without leaving the repo.
+#
+# To bump a pin:
+#   1. Look up the desired release on GitHub.
+#   2. Resolve the tag → commit SHA via
+#      `gh api /repos/<owner>/<repo>/git/ref/tags/<tag> --jq .object.sha`
+#   3. Update both the workflow YAML AND this file.
+#   4. Open a PR labeled `deps`.
+#
+# Scope: release-related workflows only. Pre-existing ci.yml hardening
+# is a follow-up TODO and NOT covered by this manifest.
+
+actions/checkout
+  pinned_sha:     de0fac2e4500dabe0009e67214ff5f5447ce83dd
+  pinned_tag:     v6.0.2
+  used_in:        release.yml
+
+actions/setup-dotnet
+  pinned_sha:     c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+  pinned_tag:     v5.2.0
+  used_in:        release.yml
+
+actions/attest-build-provenance
+  pinned_sha:     a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
+  pinned_tag:     v4.1.0
+  used_in:        release.yml
+  notes:          Requires id-token:write + attestations:write permissions.
+
+release-drafter/release-drafter
+  pinned_sha:     da8b9b696abad2ad997580e49f4c1c2e03cc2bd2
+  pinned_tag:     v7.3.0
+  used_in:        release-drafter-draft.yml (root action)
+                  release-drafter-autolabel.yml (autolabeler subpath)
+  source_citation: |
+    Exact line proving `pull_request: edited` is handled by the
+    autolabeler (per PLAN-RELEASE-WORKFLOW.md acceptance):
+      src/actions/autolabeler/main.ts:70
+      "if (matcher.test(payload.pull_request.title)) {"
+      https://github.com/release-drafter/release-drafter/blob/da8b9b696abad2ad997580e49f4c1c2e03cc2bd2/src/actions/autolabeler/main.ts#L70
+    Above that, the early-exit at main.ts:17-22 only filters
+    `context.eventName !== 'pull_request' && !== 'pull_request_target'`.
+    It does NOT filter on `context.payload.action`, so any
+    `pull_request` event type (opened, reopened, synchronize, edited,
+    ...) reaches the title matcher. For `edited` events, GitHub sends
+    the post-edit title in the payload (see
+    https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request),
+    so the matcher operates on the new title.

@@ -1,0 +1,353 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+# Allow re-running the same tag if the prior run failed mid-flight,
+# but never two different runs in parallel for the same tag.
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write       # upload Release assets
+  packages: write       # publish to nuget.pkg.github.com
+  id-token: write       # attest-build-provenance OIDC
+  attestations: write   # attest-build-provenance writes attestations
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG:      ${{ github.event.release.tag_name }}
+      GITHUB_ACTOR_ENV: ${{ github.actor }}
+
+    steps:
+      # actions/checkout v6.0.2 — see .github/pin-actions.txt
+      - name: Checkout tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          # Drop checkout token from .git/config after checkout — later
+          # git/gh calls pass `GH_TOKEN` explicitly and never authenticate
+          # via the persisted checkout credential, so persisting it
+          # extends the token's blast radius without benefit.
+          persist-credentials: false
+
+      - name: Parse + validate strict SemVer 2.0.0 tag
+        id: ver
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          # Strict SemVer 2.0.0 (no build metadata): vMAJOR.MINOR.PATCH[-PRERELEASE]
+          # PRERELEASE = identifier (. identifier)*
+          # identifier = numeric (no leading zero) | alphanumeric
+          re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
+          if [[ ! "$TAG" =~ $re ]]; then
+            echo "::error::Tag '$TAG' is not strict SemVer 2.0.0 (vMAJOR.MINOR.PATCH[-PRERELEASE]; no build metadata)."
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"          >> "$GITHUB_OUTPUT"
+
+      - name: Resolve tag commit SHA
+        id: tagsha
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse "${TAG}^{commit}")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag commit is contained in main
+        env:
+          GH_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
+          OWNER_REPO: ${{ github.repository }}
+          TAG_SHA:    ${{ steps.tagsha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # Use the REST compare API instead of `git fetch origin main`.
+          # Reason: `actions/checkout` ran with `persist-credentials:
+          # false` (security), so the runner's `.git/config` has no
+          # credential to authenticate a `git fetch` against this
+          # private repo. `gh api` reads `GH_TOKEN` from the env and
+          # works against private repos without persisting a git
+          # credential.
+          #
+          # Semantics: GET /repos/{repo}/compare/{base}...{head} returns
+          # `status` ∈ {ahead, behind, identical, diverged}, where
+          # `base = main` and `head = TAG_SHA`. The tag is reachable
+          # from main iff main contains the tag commit, i.e. main has
+          # commits the tag does not (status: `behind`) or main and
+          # tag point to the same commit (status: `identical`). Any
+          # other status (`ahead`, `diverged`) means the tag carries
+          # commits not on main and must be rejected.
+          STATUS=$(gh api "repos/${OWNER_REPO}/compare/main...${TAG_SHA}" --jq .status)
+          case "$STATUS" in
+            behind|identical)
+              echo "tag ${TAG_SHA} reachable from main (compare status: ${STATUS})"
+              ;;
+            *)
+              echo "::error::Tag commit ${TAG_SHA} is not reachable from main (compare status: ${STATUS}). Releases must be cut from a commit on main."
+              exit 1
+              ;;
+          esac
+
+      # actions/setup-dotnet v5.2.0 — see .github/pin-actions.txt
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore (locked-mode)
+        run: dotnet restore turnkey-sdk-csharp.sln --locked-mode
+
+      - name: Build
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG_SHA: ${{ steps.tagsha.outputs.sha }}
+        run: |
+          dotnet build turnkey-sdk-csharp.sln -c Release --no-restore \
+            /p:Version="$VERSION" \
+            /p:PackageVersion="$VERSION" \
+            /p:RepositoryCommit="$TAG_SHA" \
+            /p:IncludeSymbols=true \
+            /p:SymbolPackageFormat=snupkg
+
+      - name: Test
+        env:
+          TURNKEY_TEST_ORG_API_KEY: ${{ secrets.TURNKEY_TEST_ORG_API_KEY }}
+          TURNKEY_TEST_ORG_ID:      ${{ secrets.TURNKEY_TEST_ORG_ID }}
+        run: dotnet test turnkey-sdk-csharp.sln -c Release --no-build
+
+      - name: Pack
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG_SHA: ${{ steps.tagsha.outputs.sha }}
+        run: |
+          dotnet pack src/turnkey-sdk-csharp.csproj -c Release --no-build \
+            --output ./artifacts \
+            /p:Version="$VERSION" \
+            /p:PackageVersion="$VERSION" \
+            /p:RepositoryCommit="$TAG_SHA" \
+            /p:IncludeSymbols=true \
+            /p:SymbolPackageFormat=snupkg
+
+      - name: Validate local .nupkg + .snupkg contents (strict)
+        id: pack_artifacts
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          NUPKG="./artifacts/KyuzanInc.Turnkey.Sdk.${VERSION}.nupkg"
+          SNUPKG="./artifacts/KyuzanInc.Turnkey.Sdk.${VERSION}.snupkg"
+          test -f "$NUPKG"  || { echo "::error::nupkg missing";  exit 1; }
+          test -f "$SNUPKG" || { echo "::error::snupkg missing"; exit 1; }
+
+          # .nupkg: strict path enumeration + full-line fixed-string match.
+          nupkg_paths=$(unzip -Z1 "$NUPKG")
+          echo "$nupkg_paths"
+          for f in README.md LICENSE NOTICE \
+                   lib/netstandard2.1/KyuzanInc.Turnkey.Sdk.dll \
+                   lib/net8.0/KyuzanInc.Turnkey.Sdk.dll; do
+            echo "$nupkg_paths" | grep -Fxq "$f" \
+              || { echo "::error::nupkg is missing exact path '$f'"; exit 1; }
+          done
+
+          # .snupkg: must contain .pdb for both TFMs.
+          snupkg_paths=$(unzip -Z1 "$SNUPKG")
+          echo "$snupkg_paths"
+          for f in lib/netstandard2.1/KyuzanInc.Turnkey.Sdk.pdb \
+                   lib/net8.0/KyuzanInc.Turnkey.Sdk.pdb; do
+            echo "$snupkg_paths" | grep -Fxq "$f" \
+              || { echo "::error::snupkg is missing exact path '$f'"; exit 1; }
+          done
+
+          NUPKG_SHA256=$(sha256sum  "$NUPKG"  | awk '{print $1}')
+          SNUPKG_SHA256=$(sha256sum "$SNUPKG" | awk '{print $1}')
+          # Use step outputs (not $GITHUB_ENV) for explicit, unambiguous
+          # cross-step data flow. Consumers reference these as
+          # steps.pack_artifacts.outputs.<key> wrapped in workflow
+          # expression delimiters at the call site (delimiters omitted
+          # in this comment so the YAML parser does not interpolate it).
+          {
+            echo "nupkg_path=$NUPKG"
+            echo "snupkg_path=$SNUPKG"
+            echo "nupkg_sha256=$NUPKG_SHA256"
+            echo "snupkg_sha256=$SNUPKG_SHA256"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write release-checksums.txt
+        id: checksums
+        env:
+          VERSION:       ${{ steps.ver.outputs.version }}
+          TAG_SHA:       ${{ steps.tagsha.outputs.sha }}
+          NUPKG_SHA256:  ${{ steps.pack_artifacts.outputs.nupkg_sha256 }}
+          SNUPKG_SHA256: ${{ steps.pack_artifacts.outputs.snupkg_sha256 }}
+        run: |
+          set -euo pipefail
+          CHECKSUMS="./artifacts/release-checksums.txt"
+          {
+            echo "# release-checksums for KyuzanInc.Turnkey.Sdk ${VERSION}"
+            echo "version          = ${VERSION}"
+            echo "source_commit    = ${TAG_SHA}"
+            echo "nupkg_sha256     = ${NUPKG_SHA256}"
+            echo "snupkg_sha256    = ${SNUPKG_SHA256}"
+          } > "$CHECKSUMS"
+          echo "checksums_path=$CHECKSUMS" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight existing Release assets (unconditional)
+        id: preflight
+        env:
+          GH_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
+          TAG:             ${{ env.RELEASE_TAG }}
+          VERSION:         ${{ steps.ver.outputs.version }}
+          NUPKG_SHA256:    ${{ steps.pack_artifacts.outputs.nupkg_sha256 }}
+          SNUPKG_SHA256:   ${{ steps.pack_artifacts.outputs.snupkg_sha256 }}
+          NUPKG_PATH:      ${{ steps.pack_artifacts.outputs.nupkg_path }}
+          SNUPKG_PATH:     ${{ steps.pack_artifacts.outputs.snupkg_path }}
+          CHECKSUMS_PATH:  ${{ steps.checksums.outputs.checksums_path }}
+          NUPKG_NAME:      KyuzanInc.Turnkey.Sdk.${{ steps.ver.outputs.version }}.nupkg
+          SNUPKG_NAME:     KyuzanInc.Turnkey.Sdk.${{ steps.ver.outputs.version }}.snupkg
+        run: |
+          set -euo pipefail
+          mkdir -p ./_release_assets
+          HAS_PRIOR=false
+
+          # Enumerate assets that actually exist on the Release. We do NOT
+          # treat a failed `gh release download` as "asset missing" —
+          # that would swallow auth / rate-limit / API errors. Instead
+          # query `gh release view` first and download only what is
+          # present.
+          assets_json=$(gh release view "$TAG" --json assets)
+          present() {
+            local name="$1"
+            jq -e --arg n "$name" '.assets[] | select(.name == $n)' >/dev/null \
+              <<< "$assets_json"
+          }
+
+          # If an asset is present, download MUST succeed; failure here
+          # is a hard error (closed-fail).
+          check_one() {
+            local name="$1"
+            local sha256="$2"
+            if ! present "$name"; then
+              echo "preflight: $name absent"
+              return 0
+            fi
+            HAS_PRIOR=true
+            if ! gh release download "$TAG" \
+                 --pattern "$name" --dir ./_release_assets; then
+              echo "::error::Asset '$name' is listed on the Release but download failed."
+              exit 1
+            fi
+            local existing
+            existing=$(sha256sum "./_release_assets/$name" | awk '{print $1}')
+            if [[ "$existing" != "$sha256" ]]; then
+              echo "::error::Existing Release asset $name sha256 ($existing) differs from local ($sha256). Refusing to clobber."
+              exit 1
+            fi
+            echo "preflight: $name byte-equal"
+          }
+          check_one "$NUPKG_NAME"  "$NUPKG_SHA256"
+          check_one "$SNUPKG_NAME" "$SNUPKG_SHA256"
+
+          # release-checksums.txt: full byte-equality, not hash-line grep.
+          if present "release-checksums.txt"; then
+            HAS_PRIOR=true
+            if ! gh release download "$TAG" \
+                 --pattern 'release-checksums.txt' --dir ./_release_assets; then
+              echo "::error::release-checksums.txt is listed but download failed."
+              exit 1
+            fi
+            if ! cmp -s "./_release_assets/release-checksums.txt" "$CHECKSUMS_PATH"; then
+              echo "::error::Existing Release asset release-checksums.txt differs byte-for-byte from local. Refusing to clobber."
+              diff "./_release_assets/release-checksums.txt" "$CHECKSUMS_PATH" || true
+              exit 1
+            fi
+            echo "preflight: release-checksums.txt byte-equal"
+          else
+            echo "preflight: release-checksums.txt absent"
+          fi
+
+          echo "has_prior_assets=$HAS_PRIOR" >> "$GITHUB_OUTPUT"
+
+      - name: Registry-driven duplicate check
+        id: registry
+        env:
+          GH_TOKEN:       ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR:   ${{ env.GITHUB_ACTOR_ENV }}
+          PACKAGE_LOWER:  kyuzaninc.turnkey.sdk
+          VERSION:        ${{ steps.ver.outputs.version }}
+          NUPKG_SHA256:   ${{ steps.pack_artifacts.outputs.nupkg_sha256 }}
+          OWNER:          ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          URL="https://nuget.pkg.github.com/${OWNER}/download/${PACKAGE_LOWER}/${VERSION}/${PACKAGE_LOWER}.${VERSION}.nupkg"
+          HTTP_STATUS=$(curl -sL -o ./registry.nupkg -w '%{http_code}' \
+            -u "${GITHUB_ACTOR}:${GH_TOKEN}" "$URL")
+          case "$HTTP_STATUS" in
+            404)
+              echo "version not present in registry → new publish"
+              echo "is_safe_rerun=false" >> "$GITHUB_OUTPUT"
+              ;;
+            200)
+              REG_SHA256=$(sha256sum ./registry.nupkg | awk '{print $1}')
+              if [[ "$REG_SHA256" == "$NUPKG_SHA256" ]]; then
+                echo "version present and bytes match → safe rerun"
+                echo "is_safe_rerun=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "::error::Registry has version $VERSION with sha256 $REG_SHA256, locally-built nupkg sha256 is $NUPKG_SHA256. Refusing to clobber. Bump to next patch."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Unexpected HTTP $HTTP_STATUS while querying registry for version $VERSION."
+              exit 1
+              ;;
+          esac
+          rm -f ./registry.nupkg
+
+      # NOTE: attestation runs BEFORE publish so attestation failures
+      # abort before any immutable package is written to the registry.
+      # actions/attest-build-provenance v4.1.0 — see .github/pin-actions.txt
+      - name: Attest build provenance (nupkg + snupkg)
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
+        with:
+          subject-path: |
+            ${{ steps.pack_artifacts.outputs.nupkg_path }}
+            ${{ steps.pack_artifacts.outputs.snupkg_path }}
+
+      - name: Publish to GitHub Packages (new publish only)
+        if: steps.registry.outputs.is_safe_rerun == 'false'
+        env:
+          GH_PUSH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUPKG_PATH:    ${{ steps.pack_artifacts.outputs.nupkg_path }}
+          OWNER:         ${{ github.repository_owner }}
+        run: |
+          # `--no-symbols` per Microsoft docs — .snupkg goes to Release
+          # assets only. `--skip-duplicate` deliberately omitted: the
+          # registry-driven duplicate check already gated this step.
+          dotnet nuget push "$NUPKG_PATH" \
+            --source "https://nuget.pkg.github.com/${OWNER}/index.json" \
+            --api-key "$GH_PUSH_TOKEN" \
+            --no-symbols
+
+      - name: Upload nupkg + snupkg + checksums to GitHub Release
+        env:
+          GH_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          TAG:              ${{ env.RELEASE_TAG }}
+          NUPKG_PATH:       ${{ steps.pack_artifacts.outputs.nupkg_path }}
+          SNUPKG_PATH:      ${{ steps.pack_artifacts.outputs.snupkg_path }}
+          CHECKSUMS_PATH:   ${{ steps.checksums.outputs.checksums_path }}
+          HAS_PRIOR_ASSETS: ${{ steps.preflight.outputs.has_prior_assets }}
+        run: |
+          if [[ "$HAS_PRIOR_ASSETS" == "true" ]]; then
+            # Preflight proved all prior assets are byte-equal to local;
+            # --clobber is safe.
+            gh release upload "$TAG" "$NUPKG_PATH" "$SNUPKG_PATH" "$CHECKSUMS_PATH" --clobber
+          else
+            gh release upload "$TAG" "$NUPKG_PATH" "$SNUPKG_PATH" "$CHECKSUMS_PATH"
+          fi

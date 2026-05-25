@@ -1,0 +1,21 @@
+name: Release drafter — update draft on main
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      # release-drafter v7.3.0 — see .github/pin-actions.txt
+      - uses: release-drafter/release-drafter@da8b9b696abad2ad997580e49f4c1c2e03cc2bd2
+        with:
+          config-name: release-drafter.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

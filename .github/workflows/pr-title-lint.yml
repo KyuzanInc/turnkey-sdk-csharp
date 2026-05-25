@@ -1,0 +1,54 @@
+name: PR title lint
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  lint:
+    # Job display name must stay in sync with the required-check name
+    # documented in docs/release-process.md: the resulting GitHub UI
+    # status is "PR title lint / Verify conventional commit title".
+    name: Verify conventional commit title
+    runs-on: ubuntu-latest
+    env:
+      PR_TITLE: ${{ github.event.pull_request.title }}
+    steps:
+      - name: Verify conventional commit title
+        run: |
+          set -euo pipefail
+          # Structural regex: <type>(<scope>)?!?: <subject>
+          # types: feat, fix, deps, docs, ci, chore, refactor, test
+          # scope (when present): non-empty
+          # subject: at least one char (further checked below for non-whitespace)
+          re='^(feat|fix|deps|docs|ci|chore|refactor|test)(\([^)]+\))?!?: (.+)$'
+
+          # Apply GitHub's workflow-command escape (per
+          # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#example-evaluating-data-from-untrusted-sources)
+          # before inserting untrusted PR-title text into an ::error::
+          # annotation. Order matters: encode `%` first so other
+          # escape sequences are not double-encoded.
+          escape() {
+            local s="$1"
+            s="${s//%/%25}"
+            s="${s//$'\r'/%0D}"
+            s="${s//$'\n'/%0A}"
+            printf '%s' "$s"
+          }
+          sanitized_raw=$(printf '%s' "$PR_TITLE" | tr -cd '[:print:]\n\r' | head -c 200)
+          sanitized=$(escape "$sanitized_raw")
+
+          if [[ ! "$PR_TITLE" =~ $re ]]; then
+            echo "::error::PR title is not conventional (expect: <type>(scope)?!?: <subject>; types: feat|fix|deps|docs|ci|chore|refactor|test). See docs/release-process.md. Got: ${sanitized}"
+            exit 1
+          fi
+          # Subject must contain at least one non-whitespace character.
+          subject="${BASH_REMATCH[3]}"
+          if ! printf '%s' "$subject" | grep -Eq '[^[:space:]]'; then
+            echo "::error::PR title subject is whitespace-only. Got: ${sanitized}"
+            exit 1
+          fi
