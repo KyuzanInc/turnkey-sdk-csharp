@@ -1,0 +1,73 @@
+# release-drafter config.
+#
+# Draft body is curated via PR-title-driven autolabeling. The full
+# behavior model (autolabeler → labels → categories + version-resolver)
+# is documented in docs/release-process.md.
+
+name-template: "v$RESOLVED_VERSION"
+tag-template:  "v$RESOLVED_VERSION"
+
+# Stable by default. Maintainers tick the "Pre-release" checkbox in the
+# GitHub Release UI for alpha/beta tags (the workflow does not auto-detect).
+prerelease: false
+
+# Autolabeler keys on the conventional-commit PR title. Branch
+# protection's `pr-title-lint.yml` required check guarantees the title
+# is well-formed before merge.
+autolabeler:
+  - label: 'breaking'
+    title:
+      - '/^[a-z]+!:.*/'
+      - '/^[a-z]+\([^)]+\)!:.*/'
+    body:
+      - '/BREAKING CHANGE:/i'
+  - label: 'feature'
+    title: ['/^feat(\([^)]+\))?:.*/']
+  - label: 'fix'
+    title: ['/^fix(\([^)]+\))?:.*/']
+  - label: 'deps'
+    title:
+      - '/^deps(\([^)]+\))?:.*/'
+      - '/^chore\(deps\):.*/'
+  - label: 'docs'
+    title: ['/^docs(\([^)]+\))?:.*/']
+  - label: 'ci'
+    title: ['/^ci(\([^)]+\))?:.*/']
+  - label: 'chore'
+    title:
+      - '/^chore(\([^)]+\))?:.*/'
+      - '/^refactor(\([^)]+\))?:.*/'
+      - '/^test(\([^)]+\))?:.*/'
+
+categories:
+  - title: '💥 Breaking changes'
+    labels: ['breaking']
+  - title: '🚀 Features'
+    labels: ['feature']
+  - title: '🐛 Fixes'
+    labels: ['fix']
+  - title: '📦 Dependencies'
+    labels: ['deps']
+  - title: '📝 Docs'
+    labels: ['docs']
+  - title: '🔧 CI / chores'
+    labels: ['ci', 'chore']
+
+exclude-labels: ['skip-changelog']
+
+version-resolver:
+  major: { labels: ['breaking'] }
+  minor: { labels: ['feature'] }
+  patch: { labels: ['fix', 'deps', 'docs', 'ci', 'chore'] }
+  default: patch
+
+change-title-escapes: '\<*_&'
+
+template: |
+  ## What's changed in `v$RESOLVED_VERSION`
+
+  $CHANGES
+
+  ---
+
+  **Full changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION

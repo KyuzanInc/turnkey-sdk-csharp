@@ -1,0 +1,57 @@
+name: Release drafter — autolabel PR
+
+on:
+  pull_request:
+    # `edited` is included so title-edit relabeling triggers. The
+    # "Strip stale conventional-commit labels" step below runs only on
+    # `edited` events and removes stale conventional-commit labels
+    # before the autolabeler re-applies based on the current title.
+    # `labeled` / `unlabeled` deliberately excluded so manual maintainer
+    # label adjustments are not auto-reverted.
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  autolabel:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO:   ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      # release-drafter's autolabeler only ADDs labels; it cannot remove.
+      # If the title changes from "fix:" to "feat:", the stale "fix"
+      # label would linger and pollute the version-resolver. Strip the
+      # conventional-commit set first ONLY on `edited` so unmodified
+      # PR events keep their existing labels intact.
+      #
+      # We use `gh pr edit --remove-label` (NOT `gh label remove`, which
+      # would delete the label from the repository entirely). The script
+      # first queries which conventional-commit labels are actually
+      # attached to this PR, then only calls --remove-label for those.
+      # Any `gh` failure aborts.
+      - name: Strip stale conventional-commit labels (edited only)
+        if: github.event.action == 'edited'
+        run: |
+          set -euo pipefail
+          conventional='breaking feature fix deps docs ci chore'
+
+          # List labels actually attached to this PR.
+          attached=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+
+          # Intersect conventional ∩ attached; remove only those.
+          for label in $conventional; do
+            if grep -Fxq "$label" <<< "$attached"; then
+              gh pr edit "$PR_NUMBER" --remove-label "$label"
+            fi
+          done
+
+      # release-drafter v7.3.0 autolabeler subpath
+      - uses: release-drafter/release-drafter/autolabeler@da8b9b696abad2ad997580e49f4c1c2e03cc2bd2
+        with:
+          config-name: release-drafter.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
