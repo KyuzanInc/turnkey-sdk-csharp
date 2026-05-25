@@ -63,18 +63,37 @@ jobs:
 
       - name: Verify tag commit is reachable from origin/main
         env:
-          TAG_SHA: ${{ steps.tagsha.outputs.sha }}
+          GH_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
+          OWNER_REPO: ${{ github.repository }}
+          TAG_SHA:    ${{ steps.tagsha.outputs.sha }}
         run: |
           set -euo pipefail
-          # `actions/checkout` used fetch-depth: 0 so full history is
-          # present. Refresh the remote-tracking ref via an explicit
-          # refspec (no shallow boundary).
-          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "$TAG_SHA" refs/remotes/origin/main; then
-            MAIN_HEAD=$(git rev-parse refs/remotes/origin/main)
-            echo "::error::Tag commit $TAG_SHA is not reachable from origin/main (HEAD: $MAIN_HEAD). Releases must be cut from a commit on main."
-            exit 1
-          fi
+          # Use the REST compare API instead of `git fetch origin main`.
+          # Reason: `actions/checkout` ran with `persist-credentials:
+          # false` (security), so the runner's `.git/config` has no
+          # credential to authenticate a `git fetch` against this
+          # private repo. `gh api` reads `GH_TOKEN` from the env and
+          # works against private repos without persisting a git
+          # credential.
+          #
+          # Semantics: GET /repos/{repo}/compare/{base}...{head} returns
+          # `status` ∈ {ahead, behind, identical, diverged}, where
+          # `base = main` and `head = TAG_SHA`. The tag is reachable
+          # from main iff main contains the tag commit, i.e. main has
+          # commits the tag does not (status: `behind`) or main and
+          # tag point to the same commit (status: `identical`). Any
+          # other status (`ahead`, `diverged`) means the tag carries
+          # commits not on main and must be rejected.
+          STATUS=$(gh api "repos/${OWNER_REPO}/compare/main...${TAG_SHA}" --jq .status)
+          case "$STATUS" in
+            behind|identical)
+              echo "tag ${TAG_SHA} reachable from main (compare status: ${STATUS})"
+              ;;
+            *)
+              echo "::error::Tag commit ${TAG_SHA} is not reachable from main (compare status: ${STATUS}). Releases must be cut from a commit on main."
+              exit 1
+              ;;
+          esac
 
       # actions/setup-dotnet v5.2.0 — see .github/pin-actions.txt
       - name: Setup .NET 8
