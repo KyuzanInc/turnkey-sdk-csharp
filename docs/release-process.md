@@ -20,7 +20,7 @@ draft Release body.
    `vMAJOR.MINOR.PATCH[-PRERELEASE]` (e.g. `v0.2.0`, `v1.0.0-alpha.3`).
    No build metadata.
 3. Verify the **target**: a commit that exists on `main` (the workflow
-   refuses anything not reachable from `origin/main`).
+   refuses anything whose tag commit is not contained in `main`).
 4. **Pre-release toggle**:
    - For stable releases: leave the "Set as a pre-release" box
      **unchecked**.
