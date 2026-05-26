@@ -215,8 +215,48 @@ SourceLink-driven step-through into the repo source is a v0.2 follow-up.
 
 ## 8. Attestation
 
-Every published `.nupkg` and `.snupkg` carries a GitHub-issued build
-provenance attestation. Verify with the GitHub CLI:
+Attestation is **opt-in via the repo variable `ENABLE_ATTESTATION`**.
+
+- `ENABLE_ATTESTATION` unset OR not `'true'` (default): attestation
+  step is skipped. Publish proceeds. The other defense-in-depth
+  gates (ancestor check, registry byte-invariant, Release-asset
+  preflight, `release-checksums.txt`) still apply.
+- `ENABLE_ATTESTATION` set to the string `'true'` (Settings → Secrets
+  and variables → Actions → Variables): the step runs, produces a
+  SLSA build-level-3-compatible attestation, and gates publish.
+  A failed attestation aborts before any immutable registry write
+  (this ordering is in `release.yml` by design; do not reorder).
+
+### Why opt-in
+
+GitHub Artifact Attestations on **PRIVATE** repos requires a paid
+plan tier (GitHub Team or Enterprise). The KyuzanInc org is currently
+on a plan that does not include this feature. The release pipeline
+therefore defaults to attestation OFF so internal release cadence
+isn't blocked by a billing decision.
+
+The release workflow's other invariants — `gh api compare` ancestor
+check, byte-equal registry duplicate check, byte-equal Release-asset
+preflight, `release-checksums.txt` historical record — already cover
+the internal-consumption supply-chain threat model. Attestation adds
+**externally verifiable provenance**, which becomes the dominant
+need once the package has unknown / external consumers (i.e. once it
+is public). At that point, flip the variable on.
+
+### How to enable
+
+When ready (org admin has upgraded billing for private repos, OR the
+repo has been made public):
+
+1. Go to: `https://github.com/KyuzanInc/turnkey-sdk-csharp/settings/variables/actions`
+2. Click "New repository variable".
+3. Name: `ENABLE_ATTESTATION`. Value: `true`.
+4. Save. The next Release publish will produce attestations.
+
+No workflow code change is required to enable or disable — the toggle
+is a single repo-variable.
+
+### How to verify (once enabled)
 
 ```bash
 gh attestation verify \

@@ -313,7 +313,26 @@ jobs:
       # NOTE: attestation runs BEFORE publish so attestation failures
       # abort before any immutable package is written to the registry.
       # actions/attest-build-provenance v4.1.0 — see .github/pin-actions.txt
+      #
+      # `if: vars.ENABLE_ATTESTATION == 'true'` makes the step
+      # conditional on a repo-level variable. When unset/false the
+      # step is skipped and publish proceeds. When set to the string
+      # 'true' (Settings → Secrets and variables → Actions → Variables),
+      # the step runs and a failure here aborts publish (the
+      # immutable-write guard is preserved).
+      #
+      # Rationale: GitHub Artifact Attestations on PRIVATE repos
+      # requires a paid plan tier (GitHub Team or Enterprise). Until
+      # KyuzanInc upgrades billing OR this repo becomes public, the
+      # variable stays unset and publish proceeds without SLSA L3
+      # provenance. The other defense-in-depth gates (registry
+      # byte-invariant, Release-asset preflight, ancestor check,
+      # release-checksums.txt) cover the internal-consumption threat
+      # model. SLSA L3 provenance is most valuable for EXTERNAL
+      # consumers of a PUBLIC package — exactly when the variable
+      # SHOULD be flipped on. See docs/release-process.md §8.
       - name: Attest build provenance (nupkg + snupkg)
+        if: vars.ENABLE_ATTESTATION == 'true'
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
         with:
           subject-path: |
