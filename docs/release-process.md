@@ -223,17 +223,23 @@ Attestation is **opt-in via the repo variable `ENABLE_ATTESTATION`**.
   preflight, `release-checksums.txt`) still apply.
 - `ENABLE_ATTESTATION` set to the string `'true'` (Settings → Secrets
   and variables → Actions → Variables): the step runs, produces a
-  SLSA build-level-3-compatible attestation, and gates publish.
-  A failed attestation aborts before any immutable registry write
-  (this ordering is in `release.yml` by design; do not reorder).
+  GitHub-issued build provenance attestation (SLSA v1.0 Build
+  Level 2 by default with `actions/attest-build-provenance`), and
+  gates publish. A failed attestation aborts before any immutable
+  registry write (this ordering is in `release.yml` by design; do
+  not reorder). Reaching SLSA v1.0 Build Level 3 additionally
+  requires moving the build into a vetted reusable workflow; that
+  is out of scope for v0.1.
 
 ### Why opt-in
 
-GitHub Artifact Attestations on **PRIVATE** repos requires a paid
-plan tier (GitHub Team or Enterprise). The KyuzanInc org is currently
-on a plan that does not include this feature. The release pipeline
-therefore defaults to attestation OFF so internal release cadence
-isn't blocked by a billing decision.
+GitHub Artifact Attestations are only available for **PRIVATE** /
+internal repos on **GitHub Enterprise Cloud**. The Free / Pro / Team
+plans support attestations for PUBLIC repos only. The KyuzanInc org
+is not on Enterprise Cloud, so this private repo cannot produce
+attestations on the current plan. The release pipeline therefore
+defaults to attestation OFF so internal release cadence isn't
+blocked by a plan decision.
 
 The release workflow's other invariants — `gh api compare` ancestor
 check, byte-equal registry duplicate check, byte-equal Release-asset
@@ -245,8 +251,8 @@ is public). At that point, flip the variable on.
 
 ### How to enable
 
-When ready (org admin has upgraded billing for private repos, OR the
-repo has been made public):
+When ready (org admin has moved the repo to GitHub Enterprise Cloud,
+OR the repo has been made public):
 
 1. Go to: `https://github.com/KyuzanInc/turnkey-sdk-csharp/settings/variables/actions`
 2. Click "New repository variable".
@@ -266,8 +272,10 @@ gh attestation verify \
 
 The attestation proves the artifact was built by the
 `KyuzanInc/turnkey-sdk-csharp` repo's `release.yml` workflow at the
-tag's commit SHA, in the SLSA build-level-3-compatible GitHub Actions
-runner.
+tag's commit SHA, on a GitHub Actions hosted runner. With the
+current workflow this satisfies SLSA v1.0 Build Level 2; reaching
+Build Level 3 would additionally require moving the publish job
+into a vetted reusable workflow.
 
 ---
 
