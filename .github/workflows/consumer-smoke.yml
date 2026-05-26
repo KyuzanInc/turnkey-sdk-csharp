@@ -1,0 +1,136 @@
+name: Consumer install smoke
+
+# Verifies that a fresh consumer project can install
+# KyuzanInc.Turnkey.Sdk@<version> from nuget.pkg.github.com/KyuzanInc
+# and exercise the public API surface (Turnkey.Encoding +
+# Turnkey.Crypto + Turnkey.ApiKeyStamper).
+#
+# This is the canonical "consumer in a GitHub Actions job" pattern
+# documented in docs/release-process.md §5. The runner-issued
+# `secrets.GITHUB_TOKEN` carries `read:packages` for the same org by
+# default, so no PAT is needed.
+#
+# Triggered manually via workflow_dispatch — this is verification,
+# not a release-cycle gate.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: "Version to install (e.g. 0.1.0-alpha.0)"
+        required: true
+        default: "0.1.0-alpha.0"
+      tfm:
+        description: "Target framework moniker"
+        required: true
+        default: "net8.0"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  consumer-install:
+    name: Install + use ${{ inputs.package_version }}
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v6.0.2 — see .github/pin-actions.txt
+      # Checkout is only needed so setup-dotnet can find a workspace.
+      - name: Checkout (workspace anchor)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      # actions/setup-dotnet v5.2.0 — see .github/pin-actions.txt
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Create fresh consumer project
+        env:
+          TFM: ${{ inputs.tfm }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          dotnet new console --framework "$TFM" --name TurnkeySdkConsumer --force
+
+      - name: Configure GitHub Packages source via dotnet nuget add source
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd /tmp/consumer/TurnkeySdkConsumer
+          # Write the source with credentials into a LOCAL NuGet.config.
+          # Using `dotnet nuget add source` lets the CLI handle escaping
+          # of the URL/username/token. The resulting NuGet.config
+          # contains the token in clear text, which is acceptable here
+          # because (a) the file lives inside an ephemeral runner only,
+          # and (b) `secrets.GITHUB_TOKEN` is automatically revoked at
+          # job end.
+          dotnet nuget add source \
+            "https://nuget.pkg.github.com/KyuzanInc/index.json" \
+            --name kyuzan-github \
+            --username "$GH_ACTOR" \
+            --password "$GH_TOKEN" \
+            --store-password-in-clear-text
+
+      - name: Install KyuzanInc.Turnkey.Sdk
+        env:
+          VERSION: ${{ inputs.package_version }}
+        run: |
+          set -euo pipefail
+          cd /tmp/consumer/TurnkeySdkConsumer
+          dotnet add package KyuzanInc.Turnkey.Sdk --version "$VERSION"
+
+      - name: Write sample Program.cs (exercises public API)
+        run: |
+          set -euo pipefail
+          cat > /tmp/consumer/TurnkeySdkConsumer/Program.cs <<'PROGRAM'
+          using System;
+          using System.Linq;
+          using Turnkey;
+
+          internal static class Program
+          {
+              private static int Main()
+              {
+                  Console.WriteLine("=== KyuzanInc.Turnkey.Sdk consumer smoke ===");
+
+                  // 1. Turnkey.Encoding — hex round-trip
+                  byte[] sample = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11, 0x22, 0x33 };
+                  string hex = Encoding.Uint8ArrayToHexString(sample);
+                  byte[] back = Encoding.Uint8ArrayFromHexString(hex);
+                  bool encodingOk = back.SequenceEqual(sample) && hex == "deadbeef00112233";
+                  Console.WriteLine($"[1/3] Encoding.Uint8ArrayToHexString: \"{hex}\" (round-trip ok: {encodingOk})");
+                  if (!encodingOk) return 1;
+
+                  // 2. Turnkey.Crypto — generate a P-256 keypair
+                  var keyPair = Crypto.GenerateP256KeyPair();
+                  bool privOk = !string.IsNullOrEmpty(keyPair.PrivateKey) && keyPair.PrivateKey.Length == 64;
+                  bool pubOk  = !string.IsNullOrEmpty(keyPair.PublicKey)  && keyPair.PublicKey.Length  == 66;
+                  Console.WriteLine($"[2/3] Crypto.GenerateP256KeyPair: priv.len={keyPair.PrivateKey.Length}, pub.len={keyPair.PublicKey.Length} (ok: {privOk && pubOk})");
+                  if (!privOk || !pubOk) return 2;
+
+                  // 3. Turnkey.ApiKeyStamper — sign a sample payload
+                  var stamper = new ApiKeyStamper(keyPair.PublicKey, keyPair.PrivateKey);
+                  var stamp = stamper.Stamp("{\"sample\":\"payload\"}");
+                  bool stampOk = !string.IsNullOrEmpty(stamp.StampHeaderValue)
+                                 && stamp.StampHeaderName == "X-Stamp";
+                  Console.WriteLine($"[3/3] ApiKeyStamper.Stamp: header={stamp.StampHeaderName}, value.len={stamp.StampHeaderValue.Length} (ok: {stampOk})");
+                  if (!stampOk) return 3;
+
+                  Console.WriteLine();
+                  Console.WriteLine("Consumer install + use of KyuzanInc.Turnkey.Sdk verified end-to-end.");
+                  return 0;
+              }
+          }
+          PROGRAM
+
+      - name: Build + run consumer sample
+        run: |
+          set -euo pipefail
+          cd /tmp/consumer/TurnkeySdkConsumer
+          dotnet build -c Release
+          dotnet run -c Release --no-build
