@@ -10,8 +10,19 @@ name: Consumer install smoke
 # `secrets.GITHUB_TOKEN` carries `read:packages` for the same org by
 # default, so no PAT is needed.
 #
-# Triggered manually via workflow_dispatch — this is verification,
-# not a release-cycle gate.
+# Two trigger paths:
+#
+#   1. workflow_dispatch — manual run on demand. The user supplies
+#      the package version and TFM through the inputs.
+#
+#   2. workflow_run — fires automatically whenever the upstream
+#      `Release` workflow completes successfully. The version is
+#      derived from the upstream tag (workflow_run.head_branch).
+#      `workflow_run` always executes the workflow file that exists
+#      on the default branch, so the new trigger is inert on feature
+#      branches and only activates once merged to `main`.
+
+run-name: "Consumer smoke (${{ inputs.package_version || github.event.workflow_run.head_branch || 'unknown' }})"
 
 on:
   workflow_dispatch:
@@ -24,6 +35,9 @@ on:
         description: "Target framework moniker"
         required: true
         default: "net8.0"
+  workflow_run:
+    workflows: ["Release"]   # matches release.yml's `name:` field, not the filename
+    types: [completed]
 
 permissions:
   contents: read
@@ -31,9 +45,67 @@ permissions:
 
 jobs:
   consumer-install:
-    name: Install + use ${{ inputs.package_version }}
+    # Title falls back to the upstream tag short name on workflow_run
+    # so the job card never shows a dangling "Install + use " on
+    # auto-runs (where `inputs.package_version` stringifies to '').
+    name: "Install + use ${{ inputs.package_version || github.event.workflow_run.head_branch }}"
+    # Skip auto-runs that follow a failed/cancelled Release — there's
+    # no package to verify in that case. Manual dispatch always runs.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
+      # Resolve which package version + TFM this run should install.
+      # `workflow_run` events do not populate the `inputs` context
+      # (`inputs` is only available for `workflow_dispatch` and
+      # `workflow_call` events per GitHub Actions context rules), so
+      # this step branches on `github.event_name` and pulls the
+      # version from the upstream tag short name for auto-runs. On
+      # manual runs it routes the user inputs through unchanged.
+      #
+      # Outputs:
+      #   - steps.resolve.outputs.package_version
+      #   - steps.resolve.outputs.tfm
+      - name: Resolve install inputs
+        id: resolve
+        env:
+          EVENT_NAME:   ${{ github.event_name }}
+          DISPATCH_VER: ${{ inputs.package_version }}
+          DISPATCH_TFM: ${{ inputs.tfm }}
+          WR_BRANCH:    ${{ github.event.workflow_run.head_branch }}
+          WR_EVENT:     ${{ github.event.workflow_run.event }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            VER="$DISPATCH_VER"
+            TFM="$DISPATCH_TFM"
+          else
+            # workflow_run from `release.yml`. The upstream Release
+            # workflow only triggers on `release: published`, so
+            # `workflow_run.event` MUST be 'release' and
+            # `workflow_run.head_branch` is the tag ref short name
+            # (e.g. 'v0.1.0-alpha.0'). Refuse anything else.
+            if [[ "$WR_EVENT" != "release" ]]; then
+              echo "::error::Unexpected upstream workflow_run.event '$WR_EVENT' (expected 'release'). Refusing to run."
+              exit 1
+            fi
+            # Strict SemVer 2.0.0 with leading 'v' — kept BYTE-FOR-BYTE
+            # in sync with the regex in
+            # `.github/workflows/release.yml` step "Parse + validate
+            # strict SemVer 2.0.0 tag". Any drift here is a bug.
+            re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
+            if [[ ! "$WR_BRANCH" =~ $re ]]; then
+              echo "::error::workflow_run.head_branch '$WR_BRANCH' is not a strict SemVer 2.0.0 tag; refusing to install."
+              exit 1
+            fi
+            VER="${WR_BRANCH#v}"
+            TFM="net8.0"  # default for auto-runs; matrix-able in a later plan
+          fi
+          echo "package_version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tfm=$TFM"             >> "$GITHUB_OUTPUT"
+          echo "Resolved: package_version=$VER, tfm=$TFM (source=$EVENT_NAME)"
+
       # actions/checkout v6.0.2 — see .github/pin-actions.txt
       # Checkout is only needed so setup-dotnet can find a workspace.
       - name: Checkout (workspace anchor)
@@ -49,7 +121,7 @@ jobs:
 
       - name: Create fresh consumer project
         env:
-          TFM: ${{ inputs.tfm }}
+          TFM: ${{ steps.resolve.outputs.tfm }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/consumer && cd /tmp/consumer
@@ -78,7 +150,7 @@ jobs:
 
       - name: Install KyuzanInc.Turnkey.Sdk
         env:
-          VERSION: ${{ inputs.package_version }}
+          VERSION: ${{ steps.resolve.outputs.package_version }}
         run: |
           set -euo pipefail
           cd /tmp/consumer/TurnkeySdkConsumer
