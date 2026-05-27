@@ -1,0 +1,8 @@
+# All sources under tests/Fixtures/Generators/ are pinned-version generator
+# scripts whose output is byte-compared in CI. Force LF endings so reproducing
+# the fixture JSON does not depend on the developer's platform.
+*           text eol=lf
+*.mjs       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.lock      text eol=lf

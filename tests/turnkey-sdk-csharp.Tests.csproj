@@ -21,9 +21,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="Fixtures\**\*">
+    <!-- Copy fixture JSON / vectors to test output, but EXCLUDE the
+         Node-side fixture generators (PR-4). They are Node-only assets
+         (package.json, package-lock.json, node_modules/, .mjs files)
+         that must not be picked up by msbuild or copied into the test
+         output directory. -->
+    <None Include="Fixtures\**\*"
+          Exclude="Fixtures\Generators\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <Content Remove="Fixtures\Generators\**" />
+    <Compile Remove="Fixtures\Generators\**" />
+    <EmbeddedResource Remove="Fixtures\Generators\**" />
     <None Include="PublicApi.expected.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
