@@ -13,8 +13,8 @@ Statuses:
 
 ## Summary
 
-- N/A: 29
-- REVIEWED: 21
+- N/A: 28
+- REVIEWED: 22
 
 ## Rows
 
@@ -23,7 +23,7 @@ Statuses:
 | `codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/elliptic-curves-test.ts:8` | pointDecode -> uncompressed invalid | REVIEWED | tests/CryptoTests.cs:234 | UncompressRawPublicKey_BadPrefix_Throws |  |
 | `codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/elliptic-curves-test.ts:17` | pointDecode -> uncompressed valid | REVIEWED | tests/CryptoTests.cs:201 | CompressUncompress_Roundtrip_RandomKeys |  |
 | `codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/elliptic-curves-test.ts:38` | pointDecode -> compressed | REVIEWED | tests/CryptoTests.cs:518 | UncompressRawPublicKey_Secp256k1_Roundtrip |  |
-| `codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/signature-test.ts:17` | sign with Turnkey fixture: $name | N/A |  |  | runtime-variant: nodecrypto / WebCrypto / universal not ported; PureJS variant covered by ApiKeyStamperTests.SignWithApiKey_DeterministicWithRfc6979 (file tests/ApiKeyStamperTests.cs:125) |
+| `codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/signature-test.ts:17` | sign with Turnkey fixture: $name | REVIEWED | tests/ApiKeyStamperTests.cs:218 | NodeFixture_StamperByteParity_PureJsRfc6979 |  |
 | `codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/signature-test.ts:52` | sign with openssl generated key pairs: $name | N/A |  |  | runtime-variant: openssl-keypair stamp under nodecrypto / WebCrypto / universal not ported; PureJS-equivalent coverage is the random-key generator path in ApiKeyStamperTests.SignWithApiKey_ProducesDerHexThatVerifies (file tests/ApiKeyStamperTests.cs:111) |
 | `codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/stamp-test.ts:6` | uses provided signature to make stamp | REVIEWED | tests/ApiKeyStamperTests.cs:74 | Stamp_UpstreamFixture_ProducesValidWireBytes |  |
 | `codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:31` | hpkeAuthEncrypt and hpkeDecrypt - end-to-end encryption and decryption | N/A |  |  | not-ported: hpkeAuthEncrypt — auth mode (sender private key) is documented out-of-scope at src/Crypto.cs:22 and peak monorepo unused |
