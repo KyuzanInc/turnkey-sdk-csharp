@@ -1,0 +1,73 @@
+# coverage-map.na.tsv
+#
+# Curated TAB-separated list of upstream tests that the C# SDK deliberately
+# does NOT port. The companion script `coverage-map.sh` reads this file when
+# building `coverage-map.tsv` and accepts each row as an explicit N/A
+# mapping. PR-3 enables the `--check` gate, after which any row with an
+# empty reason column fails CI.
+#
+# Format:
+#   <upstream_relpath>:<line><TAB><reason>
+#
+# Reason conventions (mirror the plan's Section 6.1 list):
+#   not-ported: <symbol>       — C# does not expose this upstream API.
+#   runtime-variant: <name>    — upstream tests multiple runtimes (nodecrypto /
+#                                WebCrypto / purejs / universal); C# ports
+#                                only the deterministic purejs path.
+#   e2e-only: live-backend     — upstream only exercises this under a live
+#                                Turnkey backend; C# defers to Tier-4 opt-in.
+#   proof-fixture-only: PR-11  — covered indirectly by ProofFixtureProvenanceTests.
+#
+# Provenance for the "not-ported" reasons: see
+# codex-crypto-reviews/peak-usage-grep-evidence.md, which confirms peak does
+# not call any of these symbols.
+
+# ---- proof verifier (proof-tests.ts) — all N/A, proof scope-out ----
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts:63	proof-fixture-only: PR-11 — proof verifier not ported; PR-11 adds ProofFixtureProvenanceTests for the JSON golden values
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts:68	proof-fixture-only: PR-11 — proof verifier not ported; PR-11 covers the JSON golden values via provenance assertion
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts:77	proof-fixture-only: PR-11 — proof verifier not ported; malformed-app-proof negative path requires C# verify implementation (out of scope)
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts:101	proof-fixture-only: PR-11 — proof verifier not ported; malformed-boot-proof negative path requires C# verify implementation (out of scope)
+
+# ---- async polling (async-test.ts) — all N/A, withAsyncPolling unported ----
+codex-crypto-reviews/upstream-snapshots/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:43	not-ported: withAsyncPolling — peak monorepo does not use this helper (see codex-crypto-reviews/peak-usage-grep-evidence.md)
+codex-crypto-reviews/upstream-snapshots/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:82	not-ported: withAsyncPolling — consensus-required error rich path; peak monorepo unused
+codex-crypto-reviews/upstream-snapshots/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:133	not-ported: withAsyncPolling — rejected-activity rich error path; peak monorepo unused
+codex-crypto-reviews/upstream-snapshots/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:191	not-ported: withAsyncPolling — failed-activity rich error path; peak monorepo unused
+codex-crypto-reviews/upstream-snapshots/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:235	not-ported: withAsyncPolling — synchronous-activity fallthrough; peak monorepo unused
+codex-crypto-reviews/upstream-snapshots/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:274	not-ported: withAsyncPolling — typecheck-only test; not a runtime equivalence target
+
+# ---- crypto-test.ts: hpkeAuthEncrypt, extractPrivateKeyFromPKCS8Bytes, verifyRequestStamp ----
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:31	not-ported: hpkeAuthEncrypt — auth mode (sender private key) is documented out-of-scope at src/Crypto.cs:22 and peak monorepo unused
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:187	not-ported: extractPrivateKeyFromPKCS8Bytes — documented out-of-scope at src/Crypto.cs:23 and peak monorepo unused
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:199	not-ported: verifyRequestStamp — stamper wire verification covered indirectly by HttpTests.Stamp_HeaderValueDecodesAndVerifies; peak monorepo unused (see peak-usage-grep-evidence.md)
+
+# ---- DER parser negative tests (crypto-test.ts:263-454) — fromDerSignature unported ----
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:263	not-ported: fromDerSignature — DER input parser is out of scope (src/Crypto.cs:23). Stamper output-side DER assertion lives in ApiKeyStamperTests.SignWithApiKey_ProducesDerHexThatVerifies
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:274	not-ported: fromDerSignature — same as above; this case covers 33-byte INTEGER with leading zero
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:287	not-ported: fromDerSignature — missing SEQUENCE tag (0x30)
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:304	not-ported: fromDerSignature — empty signature negative path
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:310	not-ported: fromDerSignature — too-short signature negative path
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:319	not-ported: fromDerSignature — unsupported length encoding (0x80-0xFE)
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:332	not-ported: fromDerSignature — short-form length boundary case
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:352	not-ported: fromDerSignature — invalid r length
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:369	not-ported: fromDerSignature — invalid s length
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:386	not-ported: fromDerSignature — invalid non-padding r bytes
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:403	not-ported: fromDerSignature — invalid non-padding s bytes
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:422	not-ported: fromDerSignature — invalid r INTEGER tag
+codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:439	not-ported: fromDerSignature — invalid s INTEGER tag
+
+# ---- decryptExportBundle - PR-3 will add C# tests; for PR-2 these stay MISSING ----
+# (No N/A row — PR-3 will replace MISSING with a REVIEWED annotation on the new C# test.)
+
+# ---- signature-test.ts test.each — 4 sign variants on line 17, 3 stamp variants on line 52 ----
+# Both rows represent test.each templates with multiple runtime variants. The C#
+# port covers only the PureJS variant; nodecrypto / WebCrypto / universal are
+# documented runtime-variants. We classify the entire test.each row as N/A and
+# document the partial coverage in the variant_notes column below. The PureJS
+# coverage IS asserted by ApiKeyStamperTests (deterministic RFC 6979), so this
+# is a documentation N/A, not a true coverage gap.
+codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/signature-test.ts:17	runtime-variant: nodecrypto / WebCrypto / universal not ported; PureJS variant covered by ApiKeyStamperTests.SignWithApiKey_DeterministicWithRfc6979 (file tests/ApiKeyStamperTests.cs:125)
+codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/signature-test.ts:52	runtime-variant: openssl-keypair stamp under nodecrypto / WebCrypto / universal not ported; PureJS-equivalent coverage is the random-key generator path in ApiKeyStamperTests.SignWithApiKey_ProducesDerHexThatVerifies (file tests/ApiKeyStamperTests.cs:111)
+
+# ---- request-test.ts: grpc rich error details ----
+codex-crypto-reviews/upstream-snapshots/turnkey-http-3.16.0/ts-source/__tests__/request-test.ts:38	e2e-only: live-backend — grpc status detail decoding requires a real backend error response; peak monorepo surfaces these via TurnkeyRequestError from @turnkey/sdk-server (not the @turnkey/http layer this SDK ports)

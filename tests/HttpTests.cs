@@ -178,6 +178,7 @@ namespace Turnkey.Tests
             p.GetProperty("targetPublicKey").GetString().Should().Be(FixturePublicKey);
         }
 
+        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-http-3.16.0/ts-source/__tests__/request-test.ts:8 "requests are stamped after initialization"
         [Fact]
         public void Stamp_HeaderValueDecodesAndVerifies()
         {

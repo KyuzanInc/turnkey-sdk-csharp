@@ -69,6 +69,7 @@ namespace Turnkey.Tests
                .WithMessage("invalid P-256 private key: scalar must be in [1, n - 1]");
         }
 
+        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/stamp-test.ts:6 "uses provided signature to make stamp"
         [Fact]
         public void Stamp_UpstreamFixture_ProducesValidWireBytes()
         {
