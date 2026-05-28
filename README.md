@@ -24,8 +24,12 @@ For the authoritative Turnkey SDK in TypeScript, see
 
 ## Status
 
-Pre-release, internal-only. Not published to nuget.org. Not for public
-production use. Trademark and distribution review pending.
+**v0.1.0-alpha** — internal use within Kyuzan. The crypto and signing path
+has been through three rounds of independent Codex review (evidence under
+[`codex-crypto-reviews/`](./codex-crypto-reviews/)) and is byte-compared
+against fixtures generated from pinned `@turnkey/*` npm packages. Public
+nuget.org distribution and contribution policy are pending; trademark and
+distribution review with Turnkey, Inc. is in progress.
 
 ## Features (planned for v0.1.0)
 
@@ -38,6 +42,138 @@ production use. Trademark and distribution review pending.
   `X-Stamp` header.
 - `Turnkey.Http` — typed signed-request builders for the Turnkey API
   activity endpoints used by the peak wallet flow.
+
+## Installation
+
+This package is distributed via **GitHub Packages** during v0.1.0-alpha
+(public nuget.org distribution is pending).
+
+Create a **project-local** `nuget.config` next to your `.sln` (do NOT
+edit your global / user config; this avoids polluting other projects and
+sidesteps `NU1507` errors when consumers use Central Package Management):
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="nuget.org"     value="https://api.nuget.org/v3/index.json" />
+    <add key="kyuzan-github" value="https://nuget.pkg.github.com/KyuzanInc/index.json" />
+  </packageSources>
+  <packageSourceCredentials>
+    <kyuzan-github>
+      <add key="Username" value="%KYUZAN_GH_USER%" />
+      <add key="ClearTextPassword" value="%KYUZAN_GH_TOKEN%" />
+    </kyuzan-github>
+  </packageSourceCredentials>
+  <!-- Optional but recommended for CPM users: keep our package isolated
+       to the Kyuzan feed and everything else on nuget.org. -->
+  <packageSourceMapping>
+    <packageSource key="nuget.org">
+      <package pattern="*" />
+    </packageSource>
+    <packageSource key="kyuzan-github">
+      <package pattern="KyuzanInc.*" />
+    </packageSource>
+  </packageSourceMapping>
+</configuration>
+```
+
+Export the credentials in your shell (GitHub token needs `read:packages` scope):
+
+```bash
+export KYUZAN_GH_USER="your-github-username"
+export KYUZAN_GH_TOKEN="ghp_..."
+```
+
+Then add the package:
+
+```bash
+dotnet add package KyuzanInc.Turnkey.Sdk --version 0.1.0-alpha.0
+```
+
+> **Why project-local, not `dotnet nuget add source`**: the CLI command writes
+> to your user-global config, which leaks into every other .NET project on the
+> machine and breaks projects that use Central Package Management
+> (`ManagePackageVersionsCentrally`) with `NU1507`. A project-local
+> `nuget.config` keeps the feed scoped to this project.
+
+## Quick start
+
+Six common flows, each independently usable. An end-to-end example follows.
+
+```csharp
+using Turnkey;
+
+// 1. Generate an ephemeral P-256 key pair (HPKE recipient / session key).
+var keyPair = Crypto.GenerateP256KeyPair();
+// keyPair.PrivateKey            -> hex string
+// keyPair.PublicKey             -> hex string (33 bytes compressed)
+// keyPair.PublicKeyUncompressed -> hex string (65 bytes uncompressed)
+
+// 2. Build a signed Turnkey API request.
+//    FromTargetPrivateKey derives the public key for you.
+var http = Http.FromTargetPrivateKey(targetPrivateKey: "<your-api-private-key-hex>");
+SignedRequest signed = http.StampGetWhoami(organizationId: "<your-org-id>");
+// signed.Url, signed.Body, signed.Stamp.{StampHeaderName, StampHeaderValue}
+
+// 3. Stamp arbitrary JSON with an ApiKeyStamper.
+var stamper = new ApiKeyStamper(
+    apiPublicKey:  "<your-api-public-key-hex>",
+    apiPrivateKey: "<your-api-private-key-hex>");
+ApiKeyStamper.StampResult stamp = stamper.Stamp("{\"foo\":\"bar\"}");
+// stamp.StampHeaderName == "X-Stamp"
+// stamp.StampHeaderValue == base64url(JSON({publicKey, scheme, signature}))
+
+// 4. Decrypt a Turnkey credential bundle.
+string apiPrivateKey = Crypto.DecryptCredentialBundle(
+    encryptedCredentialBundle: "<bundle-from-turnkey>",
+    embeddedKey:               keyPair.PrivateKey);
+
+// 5. Decrypt a Turnkey export bundle (returns mnemonic or hex private key).
+string exported = Crypto.DecryptExportBundle(new Crypto.DecryptExportBundleParams
+{
+    ExportBundle    = "<export-bundle-json>",
+    EmbeddedKey     = keyPair.PrivateKey,
+    OrganizationId  = "<your-org-id>",
+    ReturnMnemonic  = false,
+    KeyFormat       = "HEXADECIMAL",
+});
+
+// 6. Encoding helpers (hex, base58, base58check).
+string hex      = Encoding.Uint8ArrayToHexString(bytes);
+byte[] decoded  = Encoding.Uint8ArrayFromHexString(hex);
+string base58   = Encoding.Base58Encode(bytes);
+```
+
+### End-to-end: `query/whoami` against the Turnkey API
+
+```csharp
+using System.Net.Http;
+using System.Text;
+using Turnkey;
+
+// 1. Build the signed request (no network call yet — the SDK does not own transport).
+var http = Http.FromTargetPrivateKey(targetPrivateKey: "<your-api-private-key-hex>");
+SignedRequest signed = http.StampGetWhoami(organizationId: "<your-org-id>");
+
+// 2. POST it. The caller owns HTTPS, retries, and error handling.
+using var client = new HttpClient();
+var req = new HttpRequestMessage(HttpMethod.Post, signed.Url)
+{
+    Content = new StringContent(signed.Body, Encoding.UTF8, "application/json"),
+};
+req.Headers.Add(signed.Stamp.StampHeaderName, signed.Stamp.StampHeaderValue);
+
+HttpResponseMessage response = await client.SendAsync(req);
+string json = await response.Content.ReadAsStringAsync();
+Console.WriteLine(json);
+```
+
+> **Caller responsibilities** (the SDK does not own these): supplying secret
+> material, calling HTTPS, retry / backoff, persistent key storage, WebAuthn,
+> OAuth / OTP. See [`docs/security/threat-model.md`](./docs/security/threat-model.md)
+> for the full boundary.
 
 ## Target frameworks
 
@@ -65,6 +201,86 @@ codex-crypto-reviews/          — pinned upstream snapshots, source-pin docs,
                                  multi-round Codex review evidence
 ```
 
+## Source mapping (Turnkey TS → this port)
+
+This package is a 1:1 logical port of the upstream Turnkey TypeScript
+packages at the versions consumed by peak. Each `.cs` file's header repeats
+this mapping for the file's own scope; the table below is the index.
+
+| npm package                | Version | TS source                                 | C# file                                 | Description                                                      |
+|----------------------------|---------|-------------------------------------------|-----------------------------------------|------------------------------------------------------------------|
+| `@turnkey/encoding`        | 0.6.0   | `hex.ts`                                  | `Encoding.cs`                           | `Uint8ArrayToHexString`, `Uint8ArrayFromHexString`, `HexToAscii`, `NormalizePadding` |
+| `@turnkey/encoding`        | 0.6.0   | `base64.ts`                               | `Encoding.cs`                           | `StringToBase64UrlString`, `HexStringToBase64Url`, `Base64UrlToBase64`, `DecodeBase64UrlToString` |
+| `@turnkey/encoding`        | 0.6.0   | `bs58.ts`, `bs58check.ts`                 | `Encoding.cs`                           | `Base58Encode/Decode`, `Base58CheckEncode/Decode`                |
+| `@turnkey/encoding`        | 0.6.0   | `encode.ts`                               | `Encoding.cs`                           | `PointEncode`                                                    |
+| `@turnkey/crypto`          | 2.8.8   | `crypto.ts` (subset)                      | `Crypto.cs`                             | `GenerateP256KeyPair`, `HpkeEncrypt/Decrypt`, `CompressRawPublicKey`, `UncompressRawPublicKey`, `BuildAdditionalAssociatedData`, `FormatHpkeBuf` |
+| `@turnkey/crypto`          | 2.8.8   | `constants.ts`                            | `Crypto.cs` (`Crypto.Constants` nested) | HPKE suite IDs, HKDF labels, signer public keys                  |
+| `@turnkey/crypto`          | 2.8.8   | `math.ts`                                 | `Crypto.cs` (`Crypto.Math` nested)      | Tonelli-Shanks `ModSqrt`                                         |
+| `@turnkey/crypto`          | 2.8.8   | HKDF helpers in `crypto.ts` (`@noble/hashes/hkdf` upstream) | `Crypto.cs` (`Crypto.Hkdf` nested) | HKDF `Extract` / `Expand`                                        |
+| `@turnkey/crypto`          | 2.8.8   | `turnkey.ts` (subset)                     | `Crypto.cs`                             | `DecryptCredentialBundle`, `EncryptPrivateKeyToBundle`, `DecryptExportBundle`, `VerifySessionJwtSignature` |
+| `@turnkey/api-key-stamper` | 0.5.0   | `index.ts`, `purejs.ts`                   | `ApiKeyStamper.cs`                      | ECDSA P-256 signing, DER-hex output, X-Stamp header construction |
+| `@turnkey/http`            | 3.16.0  | `index.ts` (signing subset)               | `Http.cs`                               | Signed activity-request builder for the 5 endpoints peak uses    |
+| (C#-specific)              | —       | —                                         | `CryptoConstants.cs`                    | BouncyCastle curve / parameter constants (not in upstream)       |
+| (C#-specific)              | —       | —                                         | `TurnkeyJsonContext.cs`                 | `System.Text.Json` source-generated context (AOT/IL2CPP-safe)    |
+
+Upstream snapshots used for the port are committed under
+[`codex-crypto-reviews/upstream-snapshots/`](./codex-crypto-reviews/) so future
+reviewers can diff against them without re-downloading from npm.
+
+## Intentionally unported
+
+The peak wallet flow does not need the following upstream surfaces, so they
+are **not** ported in v0.1.0. Each is verified absent from `src/`.
+
+**From `@turnkey/crypto` 2.8.8:**
+
+- `hpkeAuthEncrypt`
+- `quorumKeyEncrypt`
+- `extractPrivateKeyFromPKCS8Bytes`
+- `fromDerSignature`, `toDerSignature`
+- `verifyStampSignature`
+- `encryptWalletToBundle`
+- `encryptToEnclave`
+- `encryptOauth2ClientSecret`
+- `encryptOnRampSecret`
+- `proof.ts` (AWS Nitro attestation chain verification)
+
+**From `@turnkey/http` 3.16.0:**
+
+- Auto-generated activity methods beyond the 5 needed by peak
+  (`whoami`, `init_import_private_key`, `import_private_key`,
+   `export_private_key`, `export_wallet_account`).
+- Polling, error handling, retry, WebAuthn stamping.
+- The full typed client surface (only the request-signing subset is ported).
+
+**From `@turnkey/api-key-stamper` 0.5.0:**
+
+- `"browser"` (WebCrypto) and `"node"` (Node crypto) runtimes — only the
+  `"purejs"` (noble) runtime equivalent is ported, since BouncyCastle covers
+  both in a single backend.
+
+**From `@turnkey/encoding` 0.6.0:**
+
+- `base64.ts`'s React-Native `btoa` implementation — the C# port uses
+  `System.Convert.ToBase64String` directly, producing identical bytes.
+
+If any of these become required by peak, they will be added in a future
+minor — they were omitted for v0.1.0 scope, not for technical reasons.
+
+## How correctness is verified
+
+- **Multi-round Codex review** — every implementation file in `src/` has
+  three rounds of independent review by Codex; evidence committed under
+  [`codex-crypto-reviews/`](./codex-crypto-reviews/).
+- **Pinned upstream snapshots** — exact npm tarball contents for each
+  `@turnkey/*` version are committed alongside the C# port so a future
+  reviewer can byte-compare without re-fetching from npm.
+- **Threat model** — explicit scope, assets, and threat-mitigation matrix at
+  [`docs/security/threat-model.md`](./docs/security/threat-model.md).
+- **Lockfile-pinned dependencies** — `src/packages.lock.json` and
+  `tests/packages.lock.json` are committed; BouncyCastle is pinned at
+  `[2.5.0]` exact.
+
 ## Build and test
 
 ```bash
@@ -73,6 +289,14 @@ dotnet build turnkey-sdk-csharp.sln -c Release
 dotnet test  turnkey-sdk-csharp.sln -c Release \
   --collect:"XPlat Code Coverage"
 ```
+
+## Where to read next
+
+- [`docs/security/threat-model.md`](./docs/security/threat-model.md) — scope, assets, threats, mitigations.
+- [`codex-crypto-reviews/`](./codex-crypto-reviews/) — multi-round independent review evidence.
+- [`CHANGELOG.md`](./CHANGELOG.md) — release notes.
+- [`NOTICE`](./NOTICE) — upstream Turnkey TypeScript attribution.
+- Per-file `src/*.cs` header comments — exact TS → C# function mapping for each file.
 
 ## Contributing
 
