@@ -17,3 +17,31 @@ It is an unofficial / community-maintained port produced by Kyuzan Inc. and
 provided solely so .NET applications can interact with the Turnkey API.
 
 For the authoritative Turnkey SDK in TypeScript, see https://github.com/tkhq/sdk.
+
+================================================================================
+Borrowed test fixture content (Apache-2.0 source)
+================================================================================
+
+The repository includes test fixtures borrowed verbatim from the upstream
+Turnkey open-source repositories. Each borrowed fixture is bundled under
+tests/Fixtures/ and codex-crypto-reviews/upstream-snapshots/ together with
+its source URL and the git tag SHA from which the bytes were copied. The
+following borrowings are made under the Apache-2.0 license:
+
+  - codex-crypto-reviews/upstream-snapshots/turnkey-{crypto-2.8.8,
+      http-3.16.0, api-key-stamper-0.5.0, encoding-0.6.0}/
+    Source: https://github.com/tkhq/sdk (Apache-2.0)
+    Pinned git tag SHAs: see codex-crypto-reviews/turnkey-source-pins.md
+
+  - tests/Fixtures/proofs/upstream-proof-tests-fixture.json
+    Extracted from codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/
+      ts-source/__tests__/proof-tests.ts
+    Source: https://github.com/tkhq/sdk (Apache-2.0)
+
+The hex constants `mockSenderPrivateKey`, `mockPrivateKey`,
+`mockCredentialBundle`, the BIP-39 mnemonic ("leaf lady until indicate
+praise final route toast cake minimum insect unknown"), and the PEM key
+material used in tests/CryptoTests.cs and tests/ApiKeyStamperTests.cs are
+copied verbatim from upstream tkhq/sdk and tkhq/swift-sdk / tkhq/dart-sdk
+fixtures; their source URLs are recorded in the relevant Codex review
+documents under codex-crypto-reviews/.

@@ -43,6 +43,13 @@ jobs:
             --results-directory ./TestResults \
             --logger "trx;LogFileName=test-results.trx"
 
+      # Equivalence-verification gate: every upstream __tests__/*.ts test()
+      # block must either map to a C# [Fact]/[Theory] via a /// upstream:
+      # XML doc annotation, or be listed in coverage-map.na.tsv with a
+      # non-empty reason. Enabled in PR-3 per plans/PLAN-EQUIVALENCE-VERIFICATION.md.
+      - name: Coverage map gate (upstream test ↔ C# test)
+        run: ./codex-crypto-reviews/coverage-map.sh --check
+
       # Coverage gate. Threshold is set to 30% combined-TFM for
       # v0.1.0-alpha because the report counts both the netstandard2.1
       # and net8.0 production assemblies (tests only target net8.0) AND

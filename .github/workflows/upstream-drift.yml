@@ -1,0 +1,207 @@
+# Upstream-drift detection (idempotent).
+#
+# Once a month, hash each pinned upstream __tests__/*.ts and
+# __fixtures__/* file at the pinned git tag SHA via the GitHub
+# Contents API, then compare to the local pin in
+# codex-crypto-reviews/upstream-snapshots/test-file-checksums.txt.
+#
+# Per plan Section 6.4 and Section 9 risk row "公式テストファイル
+# sha256 を pin したのに毎月差分が出て CI が騒がしい":
+#
+#   - This workflow is NOT a main-branch CI gate. It can never block
+#     a PR. Drift surfaces only as a GitHub issue.
+#   - Issue creation is idempotent: at most ONE open issue with the
+#     `upstream-drift` label and the package name in the title. A
+#     re-detected drift updates the body and posts a re-detection
+#     comment instead of opening a duplicate.
+#
+# Manual trigger via workflow_dispatch is supported so reviewers can
+# re-run after re-pinning without waiting for the next cron tick.
+
+name: Upstream drift detection
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 1 * *"  # 1st of each month, 08:00 UTC
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    name: Drift detection (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: turnkey-crypto-2.8.8
+            owner: tkhq
+            repo: sdk
+            git_tag_sha: b35dc642bd7c1728f97acd43d4cba66976b65084
+            tarball_dir: packages/crypto
+          - package: turnkey-http-3.16.0
+            owner: tkhq
+            repo: sdk
+            git_tag_sha: 8def9ba521233137437ac7294693a4ae0a0d14da
+            tarball_dir: packages/http
+          - package: turnkey-api-key-stamper-0.5.0
+            owner: tkhq
+            repo: sdk
+            git_tag_sha: b711befbb88ec522452dbdac68f0e98762be10dd
+            tarball_dir: packages/api-key-stamper
+          - package: turnkey-encoding-0.6.0
+            owner: tkhq
+            repo: sdk
+            git_tag_sha: 60a997f4c52ac5f98bdd285af934f02699b88bff
+            tarball_dir: packages/encoding
+    steps:
+      - uses: actions/checkout@v6
+
+      # The pin file format is "<sha256>  <relpath>" where <relpath>
+      # always starts with "codex-crypto-reviews/upstream-snapshots/".
+      # We need to convert that to the GitHub Contents API path which
+      # is "<tarball_dir>/src/__tests__/<file>" — the live upstream
+      # GitHub tree does not have a "ts-source" prefix.
+      #
+      # Concretely the local path looks like:
+      #   codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts
+      # and the upstream path is:
+      #   packages/crypto/src/__tests__/crypto-test.ts
+      #
+      # The mapping is per-package because monorepo layouts vary.
+      - name: Compute drift report
+        id: drift
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE: ${{ matrix.package }}
+          OWNER: ${{ matrix.owner }}
+          REPO: ${{ matrix.repo }}
+          GIT_SHA: ${{ matrix.git_tag_sha }}
+          TARBALL_DIR: ${{ matrix.tarball_dir }}
+        run: |
+          set -euo pipefail
+
+          REPORT=$(mktemp)
+          : > "$REPORT"
+
+          drift_count=0
+
+          while IFS= read -r line; do
+            # Skip comments and blank lines.
+            [[ -z "${line// }" ]] && continue
+            [[ "$line" =~ ^# ]] && continue
+
+            # Format: "<sha256>  <relpath>"
+            expected_sha=$(awk '{print $1}' <<<"$line")
+            relpath=$(awk '{print $2}' <<<"$line")
+
+            # Filter to this matrix package only.
+            case "$relpath" in
+              "codex-crypto-reviews/upstream-snapshots/${PACKAGE}/"*) ;;
+              *) continue ;;
+            esac
+
+            # Strip the local prefix to derive the in-tarball relative path,
+            # then rewrite "ts-source" -> "src" for the live upstream layout.
+            local_subpath="${relpath#codex-crypto-reviews/upstream-snapshots/${PACKAGE}/}"
+            upstream_subpath=${local_subpath/ts-source\//src/}
+
+            # Read the live file via the Contents API at the pinned SHA.
+            api_path="repos/${OWNER}/${REPO}/contents/${TARBALL_DIR}/${upstream_subpath}?ref=${GIT_SHA}"
+            live_b64=$(gh api -H "Accept: application/vnd.github+json" "$api_path" --jq '.content // ""')
+            if [[ -z "$live_b64" ]]; then
+              {
+                echo "- **MISSING_UPSTREAM**: \`${upstream_subpath}\` (not found at ${OWNER}/${REPO}@${GIT_SHA})";
+              } >> "$REPORT"
+              drift_count=$((drift_count + 1))
+              continue
+            fi
+
+            # Contents API base64-decodes with embedded newlines.
+            live_sha=$(printf '%s' "$live_b64" | tr -d '\n' | base64 -d | shasum -a 256 | awk '{print $1}')
+
+            if [[ "$live_sha" != "$expected_sha" ]]; then
+              {
+                echo "- **DRIFT**: \`${upstream_subpath}\``"
+                echo "  - expected sha256 \`${expected_sha}\``"
+                echo "  - live sha256     \`${live_sha}\``"
+                echo "  - live ref        \`${OWNER}/${REPO}@${GIT_SHA}\``"
+              } >> "$REPORT"
+              drift_count=$((drift_count + 1))
+            fi
+          done < codex-crypto-reviews/upstream-snapshots/test-file-checksums.txt
+
+          {
+            echo "DRIFT_COUNT=$drift_count"
+            echo "REPORT_PATH=$REPORT"
+          } >> "$GITHUB_OUTPUT"
+
+      # Idempotent issue handling (plan Section 6.4):
+      #   - Search for an open issue labelled `upstream-drift` whose
+      #     title contains the package name.
+      #   - If found: edit the body to the latest report and add a
+      #     re-detection comment with the timestamp.
+      #   - If not found: open a new issue.
+      #   - If drift_count is 0 and an open issue exists: close it
+      #     with a "resolved" comment.
+      - name: Upsert drift issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRIFT_LABEL: upstream-drift
+          PACKAGE: ${{ matrix.package }}
+          DRIFT_COUNT: ${{ steps.drift.outputs.DRIFT_COUNT }}
+          REPORT_PATH: ${{ steps.drift.outputs.REPORT_PATH }}
+        run: |
+          set -euo pipefail
+
+          gh label create "$DRIFT_LABEL" --color "d73a4a" \
+            --description "Upstream test-file sha256 drift detected" 2>/dev/null || true
+
+          # Build the body up-front so the rest of the logic is single-shot.
+          if [[ "$DRIFT_COUNT" -gt 0 ]]; then
+            BODY_FILE=$(mktemp)
+            {
+              echo "Detected $DRIFT_COUNT drift row(s) for package \`$PACKAGE\` at $(date -u +%FT%TZ)."
+              echo ""
+              echo "## Drift"
+              echo ""
+              cat "$REPORT_PATH"
+              echo ""
+              echo "## Re-pin procedure"
+              echo ""
+              echo "See \`codex-crypto-reviews/turnkey-source-pins.md\` (\"Re-pinning procedure\")."
+            } > "$BODY_FILE"
+          fi
+
+          # Locate the single existing open issue (idempotent).
+          EXISTING=$(gh issue list \
+            --state open \
+            --label "$DRIFT_LABEL" \
+            --search "in:title $PACKAGE" \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [[ "$DRIFT_COUNT" -gt 0 ]]; then
+            if [[ -n "$EXISTING" ]]; then
+              gh issue edit "$EXISTING" --body-file "$BODY_FILE"
+              gh issue comment "$EXISTING" --body \
+                "Re-detected upstream drift on $(date -u +%FT%TZ)."
+            else
+              gh issue create \
+                --label "$DRIFT_LABEL" \
+                --title "Upstream drift: $PACKAGE" \
+                --body-file "$BODY_FILE"
+            fi
+          else
+            if [[ -n "$EXISTING" ]]; then
+              gh issue comment "$EXISTING" --body \
+                "Drift resolved (re-checked $(date -u +%FT%TZ))."
+              gh issue close "$EXISTING"
+            else
+              echo "No drift detected and no open issue. Nothing to do."
+            fi
+          fi

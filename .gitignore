@@ -34,3 +34,4 @@ codex-crypto-reviews/upstream-snapshots/*.tgz
 # OS
 .DS_Store
 Thumbs.db
+tests/Fixtures/Generators/node_modules/
