@@ -267,19 +267,10 @@ are **not** ported in v0.1.0. Each is verified absent from `src/`.
 If any of these become required by peak, they will be added in a future
 minor — they were omitted for v0.1.0 scope, not for technical reasons.
 
-## How correctness is verified
-
-- **Multi-round Codex review** — every implementation file in `src/` has
-  three rounds of independent review by Codex; evidence committed under
-  [`codex-crypto-reviews/`](./codex-crypto-reviews/).
-- **Pinned upstream snapshots** — exact npm tarball contents for each
-  `@turnkey/*` version are committed alongside the C# port so a future
-  reviewer can byte-compare without re-fetching from npm.
-- **Threat model** — explicit scope, assets, and threat-mitigation matrix at
-  [`docs/security/threat-model.md`](./docs/security/threat-model.md).
-- **Lockfile-pinned dependencies** — `src/packages.lock.json` and
-  `tests/packages.lock.json` are committed; BouncyCastle is pinned at
-  `[2.5.0]` exact.
+> **How correctness is verified** is documented in detail in the
+> [Verification posture](#verification-posture) section below: the 4-tier
+> equivalence strategy, multi-round Codex review trail, pinned upstream
+> snapshots, lockfile-pinned dependencies, and an uncertainty checklist.
 
 ## Build and test
 
@@ -292,11 +283,15 @@ dotnet test  turnkey-sdk-csharp.sln -c Release \
 
 ## Where to read next
 
+- [Verification posture](#verification-posture) — the 4-tier equivalence
+  strategy, coverage matrix, and uncertainty checklist. **Read this before
+  depending on this SDK in production.**
 - [`docs/security/threat-model.md`](./docs/security/threat-model.md) — scope, assets, threats, mitigations.
 - [`codex-crypto-reviews/`](./codex-crypto-reviews/) — multi-round independent review evidence.
 - [`CHANGELOG.md`](./CHANGELOG.md) — release notes.
 - [`NOTICE`](./NOTICE) — upstream Turnkey TypeScript attribution.
 - Per-file `src/*.cs` header comments — exact TS → C# function mapping for each file.
+- Dependency pins: `src/packages.lock.json`, `tests/packages.lock.json`; BouncyCastle pinned `[2.5.0]` exact.
 
 ## Contributing
 

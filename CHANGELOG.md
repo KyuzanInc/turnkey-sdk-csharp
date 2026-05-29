@@ -24,10 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     deliberately omitted (`hpkeAuthEncrypt`, `quorumKeyEncrypt`,
     `proof.ts`, WebAuthn stamping, the full http client, etc.) so
     consumers do not debug missing-feature confusion.
-  - New `How correctness is verified` section surfacing the multi-round
-    Codex review trail, pinned upstream snapshots, threat model, and
-    lockfile pins.
-  - New `Where to read next` navigation footer.
+  - New `Where to read next` navigation footer, pointing at the existing
+    `Verification posture` section (the authoritative 4-tier verification
+    write-up), the threat model, the Codex review trail, and the
+    dependency lockfile pins.
   - `Status` rewritten to emphasise the audit trail and ongoing
     trademark / distribution review instead of reading as a closed
     door to external readers.
