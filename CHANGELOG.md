@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- README rewritten as a self-contained entry point for .NET developers:
+  - New `Quick start` section with six copy-paste examples (key pair,
+    signed request, stamping, credential / export bundle decrypt,
+    encoding helpers) plus a full end-to-end `query/whoami` flow.
+  - New `Installation` section documenting the GitHub Packages feed
+    via a **project-local** `nuget.config` (avoids polluting the
+    user-global config and is compatible with Central Package
+    Management consumers — sidesteps `NU1507`).
+  - New `Source mapping` table indexing every upstream Turnkey TS file
+    to its C# destination so readers see provenance without opening
+    `src/*.cs` headers.
+  - New `Intentionally unported` section listing every upstream surface
+    deliberately omitted (`hpkeAuthEncrypt`, `quorumKeyEncrypt`,
+    `proof.ts`, WebAuthn stamping, the full http client, etc.) so
+    consumers do not debug missing-feature confusion.
+  - New `Where to read next` navigation footer, pointing at the existing
+    `Verification posture` section (the authoritative 4-tier verification
+    write-up), the threat model, the Codex review trail, and the
+    dependency lockfile pins.
+  - `Status` rewritten to emphasise the audit trail and ongoing
+    trademark / distribution review instead of reading as a closed
+    door to external readers.
+
 ## [0.1.0-alpha.0] — 2026-05-23
 
 ### Added
