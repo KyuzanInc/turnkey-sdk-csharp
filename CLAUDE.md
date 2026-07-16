@@ -8,10 +8,10 @@ Project-specific instructions for Claude Code agents operating in this repo.
 `net8.0`. **Not a web app.** No production URL. The "deploy artifact" is a
 `.nupkg` published to GitHub Packages.
 
-The crypto logic is a 1:1 logical port of the Turnkey TypeScript SDK at the
-versions consumed by the Kyuzan **peak** monorepo. See [`README.md`](./README.md)
-and [`codex-crypto-reviews/turnkey-source-pins.md`](./codex-crypto-reviews/turnkey-source-pins.md)
-for the exact pins.
+The crypto logic is a logical compatibility port of explicitly pinned Turnkey
+TypeScript packages. See [`README.md`](./README.md) and
+[`docs/compatibility/upstream-pins.md`](./docs/compatibility/upstream-pins.md)
+for the exact pins and verification policy.
 
 ## Deploy Configuration (configured by /setup-deploy)
 
@@ -79,19 +79,24 @@ curl -sf -H "Authorization: Bearer $GH_TOKEN" \
 - All PRs must pass:
   - `Build + test (ubuntu-latest, net8.0 runner)` — `dotnet test` 0 failures,
     coverage ≥ 30% combined-TFM (alpha threshold).
-  - `Coverage map gate (upstream test ↔ C# test)` — `codex-crypto-reviews/coverage-map.sh --check`
+  - `Coverage map gate (upstream test ↔ C# test)` — `tools/compatibility/coverage-map.sh --check`
     returns 0 MISSING and 0 empty N/A reasons.
   - `Verify conventional commit title` — PR title matches
     `^(feat|fix|deps|docs|ci|chore|refactor|test)(\([^)]+\))?!?: (.+)$`.
   - `autolabel` (informational).
-  - `dotnet pack (validation)` — `.nupkg` contains README, LICENSE, NOTICE.
+  - `dotnet pack (validation)` — `.nupkg` contains README, LICENSE, NOTICE,
+    and the Apache-2.0 license covering retained upstream-derived material.
 
-- All PRs that touch `src/*.cs` must have a re-run of the 3-round Codex review
-  per affected file (see [`codex-crypto-reviews/README.md`](./codex-crypto-reviews/README.md)).
+- Changes to compatibility-sensitive code under `src/` must preserve the
+  relevant pinned-source mapping, fixtures, and tests. Cryptography or wire
+  format changes require independent maintainer review; review transcripts are
+  not committed to the repository.
 
 - All PRs that change pinned upstream versions must update
-  [`codex-crypto-reviews/turnkey-source-pins.md`](./codex-crypto-reviews/turnkey-source-pins.md)
-  and re-run the upstream-drift workflow.
+  [`docs/compatibility/upstream-pins.md`](./docs/compatibility/upstream-pins.md),
+  regenerate `tests/UpstreamSources/source-file-checksums.txt`, and re-run the
+  upstream-drift and compatibility verification described in
+  [`docs/compatibility/verification.md`](./docs/compatibility/verification.md).
 
 ## Skill routing
 
@@ -111,6 +116,6 @@ Key routing rules:
 - Land / merge / deploy → invoke `/land-and-deploy`
 - Save progress → invoke `/context-save`
 - Resume context → invoke `/context-restore`
-- Equivalence-plan review (this project's special workflow) → use the
-  three-round Codex review script at
-  `codex-crypto-reviews/PLAN-EQUIVALENCE-VERIFICATION-review.sh`.
+- Compatibility review → follow
+  [`docs/compatibility/verification.md`](./docs/compatibility/verification.md)
+  and record durable architectural choices as ADRs under `docs/adr/`.

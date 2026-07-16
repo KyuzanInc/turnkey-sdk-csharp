@@ -1,7 +1,7 @@
-// 1:1 logical port of @turnkey/crypto@2.8.8
+// Logical compatibility port of @turnkey/crypto@2.8.8
 //
 // Upstream snapshot:
-//   codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/
+//   tests/UpstreamSources/turnkey-crypto-2.8.8/
 //
 // Files covered:
 //   ts-source/constants.ts            -> Crypto.Constants nested class
@@ -21,7 +21,7 @@
 //                                        DecryptExportBundle /
 //                                        VerifySessionJwtSignature
 //
-// Out of scope (matches the peak Unity port):
+// Deliberately outside the supported surface:
 //   hpkeAuthEncrypt, quorumKeyEncrypt, extractPrivateKeyFromPKCS8Bytes,
 //   fromDerSignature, toDerSignature
 //   verifyStampSignature, encryptWalletToBundle, encryptToEnclave,
@@ -30,20 +30,13 @@
 //
 // Adaptations:
 //   - System.Text.Json source generation (TurnkeyJsonContext) replaces
-//     Newtonsoft.Json's JObject.Parse / JsonConvert.SerializeObject used by
-//     the peak Unity port. Wire bytes are unchanged.
+//     reflection-based serializers. Signed DTO paths use explicit generated
+//     metadata and deterministic property order.
 //   - BouncyCastle 2.5.0 wraps ECDSA / ECDH / AES-GCM / SHA-256 / HMAC /
 //     BigInteger / EC point / Ed25519 primitives only. HPKE, HKDF,
-//     Tonelli-Shanks, and bundle parsing logic are direct line-by-line
-//     ports of the upstream TypeScript.
+//     Tonelli-Shanks, and bundle parsing logic remain explicit adaptations of
+//     the pinned upstream TypeScript.
 //   - Newtonsoft.Json dependency dropped.
-//
-// 2.8.8 vs 2.8.9 note:
-//   The only diff between @turnkey/crypto@2.8.8 and @turnkey/crypto@2.8.9 in
-//   the published dist/ is the inlining of QOS_ENCRYPTION_HMAC_MESSAGE
-//   (2.8.9 hard-codes the bytes; 2.8.8 uses new TextEncoder().encode("...")).
-//   They produce identical wire bytes. This port targets 2.8.8 (peak's pin)
-//   but is logically equivalent to 2.8.9 as well.
 
 using System;
 using System.Security.Cryptography;
@@ -60,8 +53,8 @@ using Org.BouncyCastle.Security;
 namespace Turnkey
 {
     /// <summary>
-    /// Cryptographic primitives and Turnkey bundle helpers. 1:1 logical port
-    /// of <c>@turnkey/crypto</c> at peak's pinned version 2.8.8.
+    /// Cryptographic primitives and Turnkey bundle helpers. Logical
+    /// compatibility port of <c>@turnkey/crypto</c> version 2.8.8.
     /// </summary>
     public static class Crypto
     {

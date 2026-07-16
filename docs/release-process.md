@@ -39,8 +39,7 @@ draft Release body.
    (`gh api compare/main...<tag_sha>`); accepts `behind` or
    `identical`, rejects anything else. (Not `git merge-base` —
    `actions/checkout` runs with `persist-credentials: false`, so
-   `git fetch origin main` on a private repo would fail without
-   a persisted credential.)
+   `git fetch origin main` would require a persisted credential.)
 3. Restore + build + full test suite. All tests must pass.
 4. Pack (`.nupkg` + `.snupkg` with deterministic settings).
 5. Strict path validation of the `.nupkg` and `.snupkg` contents.
@@ -160,8 +159,9 @@ dotnet nuget add source \
   --password YOUR_PAT \
   --store-password-in-clear-text   # required on Linux/macOS
 
-# 3. Install:
-dotnet add package KyuzanInc.Turnkey.Sdk --version 0.1.0-alpha.0
+# 3. Install (replace the example with the release you need):
+VERSION=0.1.0-alpha.1
+dotnet add package KyuzanInc.Turnkey.Sdk --version "$VERSION"
 ```
 
 ### In GitHub Actions (same org)
@@ -182,20 +182,21 @@ No additional PAT needed.
 
 ---
 
-## 6. ACL / who can install
+## 6. Package access
 
-GitHub Packages inherits visibility from the source repo by default:
+GitHub Packages NuGet authentication is required even when the source
+repository is public. Repository and package visibility are managed separately
+by GitHub and must be checked before each public release announcement.
 
-- `KyuzanInc/turnkey-sdk-csharp` is **private**, so the package is
-  **private** (only users with read access can install).
-- Org members with repo read access → can install.
-- External contributors → need to be added as repo collaborators with
-  at least `Read` access, then they can use a PAT scoped to
-  `read:packages` + this repo.
+- Consumers need a GitHub account and a classic PAT with `read:packages`.
+- If the package is not public, consumers also need package or repository read
+  access.
+- Making the source repository public does not change the release target:
+  packages continue to publish only to GitHub Packages.
 
-To change package visibility (e.g. publish to nuget.org later or open
-to a wider audience), an org admin must explicitly do so on the
-package page → "Package settings → Change visibility".
+Any visibility change is an explicit administrator operation on the GitHub
+repository or package settings. This runbook does not authorize or automate it.
+Publishing to nuget.org is out of scope.
 
 ---
 
@@ -233,26 +234,16 @@ Attestation is **opt-in via the repo variable `ENABLE_ATTESTATION`**.
 
 ### Why opt-in
 
-GitHub Artifact Attestations are only available for **PRIVATE** /
-internal repos on **GitHub Enterprise Cloud**. The Free / Pro / Team
-plans support attestations for PUBLIC repos only. The KyuzanInc org
-is not on Enterprise Cloud, so this private repo cannot produce
-attestations on the current plan. The release pipeline therefore
-defaults to attestation OFF so internal release cadence isn't
-blocked by a plan decision.
-
-The release workflow's other invariants — `gh api compare` ancestor
-check, byte-equal registry duplicate check, byte-equal Release-asset
-preflight, `release-checksums.txt` historical record — already cover
-the internal-consumption supply-chain threat model. Attestation adds
-**externally verifiable provenance**, which becomes the dominant
-need once the package has unknown / external consumers (i.e. once it
-is public). At that point, flip the variable on.
+Artifact-attestation eligibility depends on repository visibility and the
+organization's GitHub plan. The release pipeline therefore requires a
+maintainer to confirm eligibility before enabling the gate. When attestation is
+disabled, the ancestor check, byte-equal registry duplicate check, byte-equal
+Release-asset preflight, and `release-checksums.txt` remain mandatory.
 
 ### How to enable
 
-When ready (org admin has moved the repo to GitHub Enterprise Cloud,
-OR the repo has been made public):
+After confirming that the repository is eligible for GitHub Artifact
+Attestations:
 
 1. Go to: `https://github.com/KyuzanInc/turnkey-sdk-csharp/settings/variables/actions`
 2. Click "New repository variable".
@@ -265,9 +256,10 @@ is a single repo-variable.
 ### How to verify (once enabled)
 
 ```bash
+VERSION=0.1.0-alpha.1
 gh attestation verify \
   --owner KyuzanInc \
-  KyuzanInc.Turnkey.Sdk.0.1.0-alpha.0.nupkg
+  "KyuzanInc.Turnkey.Sdk.${VERSION}.nupkg"
 ```
 
 The attestation proves the artifact was built by the

@@ -3,22 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Node-side fixture generator for the C# SDK equivalence-verification plan (PR-4..PR-7).",
+  "description": "Reproducible upstream compatibility fixtures for the C# SDK.",
   "engines": {
     "node": ">=20.10.0 <25"
   },
   "scripts": {
     "preflight": "node generate-stamper-vectors.mjs --preflight-only",
-    "gen:http": "node generate-http-vectors.mjs",
     "gen:stamper": "node generate-stamper-vectors.mjs",
-    "gen:crypto": "node generate-crypto-vectors.mjs",
-    "gen:all": "npm run gen:http && npm run gen:stamper && npm run gen:crypto"
+    "gen:all": "npm run gen:stamper"
   },
   "dependencies": {
-    "@turnkey/api-key-stamper": "0.5.0",
-    "@turnkey/crypto": "2.8.8",
-    "@turnkey/encoding": "0.6.0",
-    "@turnkey/http": "3.16.0"
+    "@noble/curves": "1.3.0",
+    "@turnkey/api-key-stamper": "0.5.0"
   },
   "overrides": {
     "@noble/curves": "1.3.0",

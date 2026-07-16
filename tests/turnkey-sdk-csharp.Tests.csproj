@@ -22,7 +22,7 @@
 
   <ItemGroup>
     <!-- Copy fixture JSON / vectors to test output, but EXCLUDE the
-         Node-side fixture generators (PR-4). They are Node-only assets
+         Node-side fixture generators. They are Node-only assets
          (package.json, package-lock.json, node_modules/, .mjs files)
          that must not be picked up by msbuild or copied into the test
          output directory. -->

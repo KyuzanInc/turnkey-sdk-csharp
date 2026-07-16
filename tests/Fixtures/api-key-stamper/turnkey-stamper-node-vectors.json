@@ -2,12 +2,12 @@
   "_provenance": {
     "level": "node-generated",
     "node_version": "v24.11.0",
-    "npm_lockfile_sha256": "983b87489e07aa66ae2aa13439b18a1053b3f8fce8b0dbb35120f3458eb769c6",
-    "generator_sha256": "b319253acfdd309c866f875ee64c400f377bd009d45e926742abe24f8ecbc269",
-    "transitive_lock_sha256": "6b58f8e2283061ed24399279d9ee52dde58d5b56479723ac66542b74fcc67688",
-    "output_sha256": "ac6327bc6d3fa0801095c450cb7034b6743b89a9db473746aeadb104f341ce68",
+    "npm_lockfile_sha256": "2fafab9c9c7ce0aac9fa61d49e3c3f813945bba0e343bcebe894b0b94d2a859f",
+    "generator_sha256": "fdd27555e9c2af440b02e8009aef18f4a18af223a91adb92a3e3c1653a8c37ec",
+    "transitive_lock_sha256": "aa212414d14d508aae5a97870e23b373f8f77277262f8933613fe7df2ed6b76a",
+    "output_sha256": "c79ba91b922a66f083203f79cdd9b255513c98efbf8abb5ab5998b44cb739482",
     "upstream_pin": "@turnkey/api-key-stamper@0.5.0",
-    "noble_curves_pin": "@noble/curves@1.3.0 (via npm overrides in package.json)",
+    "noble_curves_pin": "@noble/curves@1.3.0 (direct dependency and npm override)",
     "generator_source": "tests/Fixtures/Generators/generate-stamper-vectors.mjs",
     "runtime_override": "purejs",
     "s_normalization": "upstream emits HIGH-S; fixture records both upstream_s and low_s_equivalent_s. C# port emits LOW-S; tests compare r equality and verify the signature."
@@ -21,7 +21,7 @@
     "upstream_s": "b03f26581a4a6f3a5f11eb01556ba32980a8a1c4fad672a8c6e63da398e95beb",
     "upstream_s_is_high_s": true,
     "low_s_equivalent_s": "4fc0d9a6e5b590c6a0ee14feaa945cd63c3e58e8ac412bdc2cd38d1f6379c966",
-    "note": "Upstream @noble/curves p256.sign defaults to HIGH-S in v1.x. C# port enforces LOW-S. The two signatures are cryptographically equivalent: same r, s' = n - s. C# tests assert r equality and verify the signature, not full DER byte equality.",
+    "note": "Pinned @noble/curves@1.3.0 emits HIGH-S for this vector. C# port enforces LOW-S. The two signatures are cryptographically equivalent: same r, s' = n - s. C# tests assert r equality and verify the signature, not full DER byte equality.",
     "deterministic": true,
     "schemeOk": true,
     "keyOrderOk": true

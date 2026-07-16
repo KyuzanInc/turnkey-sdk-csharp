@@ -4,11 +4,11 @@
 surface, JSON serialization for wire payloads, test-secret handling.
 
 **Scope (out)**: persistent storage, on-disk key storage, SecureStorage
-implementations, OS-level keychain integration. Those belong to
-`peak-sdk-csharp` / `peak-sdk-csharp-unity` (separate packages).
+implementations, OS-level keychain integration. Those belong to the consuming
+application or a higher-level integration package.
 
-This document is the initial v0.1.0-alpha.0 draft. It will be tightened during
-the implementation rounds.
+This document records the current library boundary and known verification
+limits. Compatibility gaps are tracked in `docs/compatibility/verification.md`.
 
 ## Assets
 
@@ -40,15 +40,15 @@ Caller code ──► turnkey-sdk-csharp ──► HTTPS Turnkey API
 | ID | Threat | Mitigation |
 |---|---|---|
 | T-1 | Signing path produces a payload that differs by a single byte from what Turnkey expects (canonical JSON drift) | Golden fixtures generated from pinned Node packages; byte-compared in tests. |
-| T-2 | ECDSA signature is not low-S, gets rejected | DER + low-S explicit; round-trip vs Node-produced signature in tests. |
-| T-3 | HPKE shared-secret derivation off by one constant or label, garbles bundle decrypt | RFC 9180 §A.3 vectors + Turnkey-pinned sample bundle round-trip. |
-| T-4 | HKDF Extract / Expand off-by-one or wrong info ordering | RFC 5869 A.1-A.7 vectors. |
+| T-2 | ECDSA signature is not canonical low-S | Explicit low-S normalization; the deterministic Node fixture verifies identical `r`, the `s ↔ (n - s)` relationship, and both signatures. |
+| T-3 | HPKE shared-secret derivation off by one constant or label, garbles bundle decrypt | C# round-trip tests plus pinned upstream credential/export bundle fixtures. Fixed-ephemeral RFC 9180 byte equality remains an explicit gap. |
+| T-4 | HKDF Extract / Expand off-by-one or wrong info ordering | RFC 5869 SHA-256 test cases A.1-A.3. |
 | T-5 | Caller passes a leading-zero P-256 scalar; BigInteger drops the leading zero, corrupts signature | leading-zero unit tests; explicit pad-to-32 helper used everywhere. |
-| T-6 | AES-GCM tag/nonce/AAD layout drift vs noble | exercised by HPKE §A.3 + Turnkey bundle round-trip. |
+| T-6 | AES-GCM tag/nonce/AAD layout drift vs noble | Exercised by HPKE round-trip tests and pinned Turnkey bundle fixtures. |
 | T-7 | JSON serialization picks up unexpected property order, breaks Turnkey-side `SHA-256(body)` | source-generated JSON only via `TurnkeyJsonContext`; golden fixtures byte-compared. |
-| T-8 | Reflection-based serialization path falls back at runtime under trimming, breaks signing | `JsonSerializerIsReflectionEnabledByDefault=false` not yet wired; covered by AOT smoke. |
+| T-8 | Reflection-based serialization path falls back at runtime under trimming, breaks signing | Signed wire paths use explicit source-generated `JsonTypeInfo`; a dedicated trimmed/AOT smoke test remains a documented gap. |
 | T-9 | A future BouncyCastle bump silently changes ECDSA / AES-GCM semantics | exact pin via `[2.5.0]`; `packages.lock.json` committed. |
-| T-10 | Test fixtures contain real org credentials | fixture provenance README; PR-time scan for credential-shaped strings. |
+| T-10 | Test fixtures contain real org credentials | Only public upstream test vectors are retained and labeled; OSS-readiness scans review credential-shaped content. |
 | T-11 | CI logs include signed payloads | secrets via env, no `echo` of payload, fixtures de-identified. |
 | T-12 | E2E live test against Turnkey leaks the test-org credentials | E2E gated behind env-var presence; not run by default; CI scrubs logs. |
 
@@ -60,4 +60,4 @@ Caller code ──► turnkey-sdk-csharp ──► HTTPS Turnkey API
 - Does not provide retry / backoff / circuit breakers; that is caller scope.
 - Does not handle WebAuthn / passkey stamping (out of v0.1.0 scope).
 - Does not handle Google OAuth, OTP, or any higher-level identity flow.
-  Those belong to `peak-sdk-csharp` or peak-server.
+  Those belong to the consuming application.

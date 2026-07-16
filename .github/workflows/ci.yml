@@ -43,12 +43,15 @@ jobs:
             --results-directory ./TestResults \
             --logger "trx;LogFileName=test-results.trx"
 
-      # Equivalence-verification gate: every upstream __tests__/*.ts test()
+      - name: Verify pinned upstream source checksums
+        run: ./tools/compatibility/verify-source-checksums.sh
+
+      # Compatibility-coverage gate: every upstream __tests__/*.ts test()
       # block must either map to a C# [Fact]/[Theory] via a /// upstream:
       # XML doc annotation, or be listed in coverage-map.na.tsv with a
-      # non-empty reason. Enabled in PR-3 per plans/PLAN-EQUIVALENCE-VERIFICATION.md.
+      # non-empty public rationale.
       - name: Coverage map gate (upstream test ↔ C# test)
-        run: ./codex-crypto-reviews/coverage-map.sh --check
+        run: ./tools/compatibility/coverage-map.sh --check
 
       # Coverage gate. Threshold is set to 30% combined-TFM for
       # v0.1.0-alpha because the report counts both the netstandard2.1
@@ -94,15 +97,17 @@ jobs:
         run: |
           dotnet pack src/turnkey-sdk-csharp.csproj -c Release \
             --no-restore --output ./artifacts
-      - name: Validate NuGet contents (README, LICENSE, NOTICE)
+      - name: Validate NuGet contents (README, licenses, NOTICE)
         run: |
           set -euo pipefail
           NUPKG=$(ls ./artifacts/KyuzanInc.Turnkey.Sdk.*.nupkg | head -1)
+          CONTENTS_FILE="$RUNNER_TEMP/package-contents.txt"
           echo "Validating $NUPKG"
-          unzip -l "$NUPKG" | tee /tmp/contents.txt
-          grep -q 'README.md' /tmp/contents.txt
-          grep -q 'LICENSE'   /tmp/contents.txt
-          grep -q 'NOTICE'    /tmp/contents.txt
+          unzip -l "$NUPKG" | tee "$CONTENTS_FILE"
+          grep -q 'README.md' "$CONTENTS_FILE"
+          grep -q 'LICENSE'   "$CONTENTS_FILE"
+          grep -q 'NOTICE'    "$CONTENTS_FILE"
+          grep -q 'LICENSES/Apache-2.0.txt' "$CONTENTS_FILE"
       - name: Upload .nupkg + .snupkg artifacts
         uses: actions/upload-artifact@v7
         with:

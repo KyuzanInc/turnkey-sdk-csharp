@@ -1,10 +1,10 @@
 {
   "_provenance": {
     "level": "upstream-test-vectors",
-    "source": "codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts",
+    "source": "tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts",
     "package": "@turnkey/crypto@2.8.8",
     "tarball_sha256": "75115706fccc29c664f9f918d9a0c2c1798eb03f261cb5b0c186c75663cf79d3",
-    "note": "Real Turnkey-pinned credential bundle test vector. Verified by Codex r2 against the upstream Jest test (__tests__/crypto-test.ts line 179-184)."
+    "note": "Public credential-bundle test vector retained from the pinned upstream Jest test (__tests__/crypto-test.ts lines 179-184)."
   },
   "decryptCredentialBundle": [
     {

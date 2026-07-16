@@ -6,12 +6,12 @@
 //
 // IMPORTANT DESIGN NOTE
 // ---------------------
-// Upstream purejs.ts (codex-crypto-reviews/upstream-snapshots/
+// Upstream purejs.ts (tests/UpstreamSources/
 //   turnkey-api-key-stamper-0.5.0/ts-source/purejs.ts) calls
 //   p256.sign(hash, privateKey)
-// with NO options. With every version of @noble/curves in the 1.x line
-// (1.3.0 through 1.9.x), this defaults to HIGH-S (s > n/2) — low-S
-// requires the explicit { lowS: true } option.
+// with NO options. With the pinned @noble/curves@1.3.0 dependency, the
+// retained vector is emitted as HIGH-S (s > n/2); the low-S equivalent
+// requires explicit normalization.
 //
 // The C# port (src/ApiKeyStamper.cs) enforces low-S because that is the
 // standard ECDSA wire-format that downstream verifiers expect. The two
@@ -35,9 +35,8 @@
 // the C# tests can compare r and verify the signature, but cannot
 // compare s or DER hex.
 //
-// This intentional divergence is documented as the load-bearing
-// finding from PR-4's preflight check (see plan Section 9 risk row
-// `@noble/curves transitive drift`).
+// This intentional divergence is documented in
+// docs/adr/0003-cryptographic-adaptation-policy.md.
 
 import { ApiKeyStamper } from "@turnkey/api-key-stamper";
 import { p256 } from "@noble/curves/p256";
@@ -54,8 +53,8 @@ const PREFLIGHT_ONLY = process.argv.includes("--preflight-only");
 
 const STAMPER_SNAPSHOT = path.join(
   REPO_ROOT,
-  "codex-crypto-reviews",
-  "upstream-snapshots",
+  "tests",
+  "UpstreamSources",
   "turnkey-api-key-stamper-0.5.0",
   "ts-source",
   "__fixtures__",
@@ -158,7 +157,7 @@ async function runPreflight() {
     upstream_s: sigDecoded.sHex,
     upstream_s_is_high_s: sigDecoded.s > P256_ORDER / 2n,
     low_s_equivalent_s: lowSEquivalent(sigDecoded.s).toString(16),
-    note: "Upstream @noble/curves p256.sign defaults to HIGH-S in v1.x. " +
+    note: "Pinned @noble/curves@1.3.0 emits HIGH-S for this vector. " +
       "C# port enforces LOW-S. The two signatures are cryptographically " +
       "equivalent: same r, s' = n - s. C# tests assert r equality and " +
       "verify the signature, not full DER byte equality.",
@@ -241,7 +240,7 @@ async function main() {
       transitive_lock_sha256: tLockSha,
       output_sha256: outputSha,
       upstream_pin: "@turnkey/api-key-stamper@0.5.0",
-      noble_curves_pin: "@noble/curves@1.3.0 (via npm overrides in package.json)",
+      noble_curves_pin: "@noble/curves@1.3.0 (direct dependency and npm override)",
       generator_source: "tests/Fixtures/Generators/generate-stamper-vectors.mjs",
       runtime_override: "purejs",
       s_normalization: "upstream emits HIGH-S; fixture records both upstream_s and low_s_equivalent_s. C# port emits LOW-S; tests compare r equality and verify the signature.",

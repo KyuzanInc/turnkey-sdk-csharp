@@ -5,7 +5,7 @@
 //   - NIST P-256 known points (G and 2G) for GetPublicKey
 //   - Compress/UncompressRawPublicKey roundtrip
 //   - HpkeEncrypt/HpkeDecrypt roundtrip (deterministic round-trip)
-//   - VerifySessionJwtSignature negative cases
+//   - VerifySessionJwtSignature upstream positive vector and negative cases
 //
 // Tests that require a Turnkey-signed bundle (DecryptCredentialBundle,
 // EncryptPrivateKeyToBundle, DecryptExportBundle against PRODUCTION_SIGNER)
@@ -194,9 +194,9 @@ namespace Turnkey.Tests
         // CompressRawPublicKey / UncompressRawPublicKey
         // ============================================================
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:172 "compressRawPublicKey - returns a valid value"
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:233 "uncompressRawPublicKey happy path"
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/elliptic-curves-test.ts:17 "pointDecode -> uncompressed valid"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:172 "compressRawPublicKey - returns a valid value"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:233 "uncompressRawPublicKey happy path"
+        /// upstream: tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/elliptic-curves-test.ts:17 "pointDecode -> uncompressed valid"
         [Fact]
         public void CompressUncompress_Roundtrip_RandomKeys()
         {
@@ -228,8 +228,8 @@ namespace Turnkey.Tests
             act.Should().NotThrow();
         }
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:241 "uncompressRawPublicKey invalid prefix"
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/elliptic-curves-test.ts:8 "pointDecode -> uncompressed invalid"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:241 "uncompressRawPublicKey invalid prefix"
+        /// upstream: tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/elliptic-curves-test.ts:8 "pointDecode -> uncompressed invalid"
         [Fact]
         public void UncompressRawPublicKey_BadPrefix_Throws()
         {
@@ -240,7 +240,7 @@ namespace Turnkey.Tests
                .WithMessage("failed to uncompress raw public key: invalid prefix");
         }
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:251 "uncompressRawPublicKey invalid length"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:251 "uncompressRawPublicKey invalid length"
         [Fact]
         public void UncompressRawPublicKey_WrongLength_Throws()
         {
@@ -255,7 +255,7 @@ namespace Turnkey.Tests
         // GetPublicKey / GenerateP256KeyPair
         // ============================================================
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:163 "generateP256KeyPair - generates a valid key pair"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:163 "generateP256KeyPair - generates a valid key pair"
         [Fact]
         public void GenerateP256KeyPair_LengthsAreCorrect()
         {
@@ -267,7 +267,7 @@ namespace Turnkey.Tests
             kp.PublicKeyUncompressed.Should().StartWith("04");
         }
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:154 "getPublicKey - returns the correct public key"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:154 "getPublicKey - returns the correct public key"
         [Fact]
         public void GetPublicKey_FromPrivateKey_ProducesCompressedByDefault()
         {
@@ -329,7 +329,7 @@ namespace Turnkey.Tests
         // HPKE roundtrip
         // ============================================================
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:67 "hpkeEncrypt and hpkeDecrypt - standard mode (ephemeral sender key)"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:67 "hpkeEncrypt and hpkeDecrypt - standard mode (ephemeral sender key)"
         [Fact]
         public void Hpke_EncryptThenDecrypt_RoundTripsArbitraryPayload()
         {
@@ -466,10 +466,21 @@ namespace Turnkey.Tests
         }
 
         // ============================================================
-        // VerifySessionJwtSignature negative paths
+        // VerifySessionJwtSignature
         // ============================================================
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:459 "Session JWT signature: verifies the provided JWT against its public key"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:459 "Session JWT signature: verifies the provided JWT against its public key"
+        [Fact]
+        public void VerifySessionJwtSignature_UpstreamVector_ReturnsTrue()
+        {
+            const string jwt =
+                "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9."
+                + "eyJleHAiOjE3NDg4NzY4MzcsInB1YmxpY19rZXkiOiIwMzk5ZmUyYWNlNjIwOGFmMGFkZjg0OGY0NGJjNDgyMTBiNTk0YjdlNjllY2Q5MWVjOTY4ZmQ3NWIzYmI0NDgzMzYiLCJzZXNzaW9uX3R5cGUiOiJTRVNTSU9OX1RZUEVfUkVBRF9XUklURSIsInVzZXJfaWQiOiI2OTEyYjgxOS1mNGRmLTQwZjQtYTE5Mi0yMGVlNDMwOTA5NzQiLCJvcmdhbml6YXRpb25faWQiOiJjNzVlY2IwNy1jODRhLTRkZDUtOTMyYy01MzlkZmFmYzY4NjQifQ."
+                + "y6LPW1jlTwc9jFcvCwKJoKfleL_vHnGUr5tRVdMFUCnHvDspSPZ3DWK85tf1znCCBFQ6MYaFOl-1FLb0KcFxqQ";
+
+            Crypto.VerifySessionJwtSignature(jwt).Should().BeTrue();
+        }
+
         [Fact]
         public void VerifySessionJwtSignature_Empty_Throws()
         {
@@ -513,7 +524,7 @@ namespace Turnkey.Tests
         // Curve.Secp256k1 — UncompressRawPublicKey
         // ============================================================
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/elliptic-curves-test.ts:38 "pointDecode -> compressed"
+        /// upstream: tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/elliptic-curves-test.ts:38 "pointDecode -> compressed"
         [Fact]
         public void UncompressRawPublicKey_Secp256k1_Roundtrip()
         {
@@ -532,12 +543,12 @@ namespace Turnkey.Tests
         // Bundle helpers — including a real Turnkey-pinned vector
         // ============================================================
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:179 "decryptCredentialBundle - successfully decrypts a credential bundle"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:179 "decryptCredentialBundle - successfully decrypts a credential bundle"
         [Fact]
         public void DecryptCredentialBundle_UpstreamVector()
         {
             // From upstream tests/__tests__/crypto-test.ts:179-184
-            // (codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts)
+            // (tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts)
             const string credentialBundle =
                 "w99a5xV6A75TfoAUkZn869fVyDYvgVsKrawMALZXmrauZd8hEv66EkPU1Z42CUaHESQjcA5bqd8dynTGBMLWB9ewtXWPEVbZvocB4Tw2K1vQVp7uwjf";
             const string embeddedKey =
@@ -621,7 +632,7 @@ namespace Turnkey.Tests
         // ============================================================
         // decryptExportBundle — upstream golden bundle (mnemonic + non-mnemonic)
         //
-        // Source: codex-crypto-reviews/upstream-snapshots/
+        // Source: tests/UpstreamSources/
         //   turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:109-150
         //
         // The bundle was generated by a real enclave so the signature
@@ -644,7 +655,7 @@ namespace Turnkey.Tests
         private const string UpstreamExportOrganizationId =
             "f9a31c64-d604-42e4-9bef-a773096afad7";
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:122 "decryptExportBundle successfully decrypts a valid bundle - mnemonic"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:122 "decryptExportBundle successfully decrypts a valid bundle - mnemonic"
         [Fact]
         public void DecryptExportBundle_UpstreamVector_Mnemonic()
         {
@@ -663,7 +674,7 @@ namespace Turnkey.Tests
             result.Should().Be(expectedMnemonic);
         }
 
-        /// upstream: codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:137 "decryptExportBundle successfully decrypts a valid bundle - non-mnemonic"
+        /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:137 "decryptExportBundle successfully decrypts a valid bundle - non-mnemonic"
         [Fact]
         public void DecryptExportBundle_UpstreamVector_NonMnemonic()
         {

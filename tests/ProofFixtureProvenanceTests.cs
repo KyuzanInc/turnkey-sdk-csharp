@@ -1,8 +1,8 @@
-// ProofFixtureProvenanceTests.cs — PR-11
+// ProofFixtureProvenanceTests.cs
 //
 // Asserts the structural integrity and provenance of the upstream proof
 // fixture JSON committed at tests/Fixtures/proofs/. The C# proof
-// verifier is OUT OF SCOPE per plan Section 12; this test class
+// verifier is outside the supported surface; this test class
 // guarantees only:
 //
 //   1. The fixture JSON parses.
@@ -44,8 +44,8 @@ namespace Turnkey.Tests
         // we resolve the snapshot path by walking up to the repo root.
         private static string ResolveRepoRoot()
         {
-            // tests/bin/Release/net8.0/  -> walk up to ".claude/worktrees/<x>"
-            // or the actual repo root (containing turnkey-sdk-csharp.sln).
+            // tests/bin/Release/net8.0/ -> walk up to the repository root
+            // containing turnkey-sdk-csharp.sln.
             string dir = AppContext.BaseDirectory;
             for (int i = 0; i < 8; i++)
             {
@@ -77,7 +77,7 @@ namespace Turnkey.Tests
 
             prov.GetProperty("level").GetString().Should().Be("upstream-test-vectors");
             prov.GetProperty("upstream_file").GetString().Should().StartWith(
-                "codex-crypto-reviews/upstream-snapshots/turnkey-crypto-");
+                "tests/UpstreamSources/turnkey-crypto-");
             prov.GetProperty("upstream_file_sha256").GetString().Should().MatchRegex("^[0-9a-f]{64}$");
             prov.GetProperty("upstream_package").GetString().Should().Be("@turnkey/crypto");
             prov.GetProperty("upstream_package_version").GetString().Should().NotBeNullOrWhiteSpace();

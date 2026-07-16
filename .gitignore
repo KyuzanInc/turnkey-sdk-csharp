@@ -28,8 +28,8 @@ coverage*.json
 project.lock.json
 project.fragment.lock.json
 
-# Codex review work artifacts
-codex-crypto-reviews/upstream-snapshots/*.tgz
+# Reproducible upstream package archives (hashes are tracked, archives are not)
+tests/UpstreamSources/*.tgz
 
 # OS
 .DS_Store
