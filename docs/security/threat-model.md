@@ -32,25 +32,26 @@ Caller code ──► turnkey-sdk-csharp ──► HTTPS Turnkey API
   raw key material, never throws an exception that includes raw key bytes.
 - **SDK → network**: the SDK produces request bytes; the caller is expected
   to send them over HTTPS. The SDK does not own the transport.
-- **SDK → CI / test logs**: tests must use de-identified fixtures; live
-  Turnkey credentials never appear in commit history or CI logs.
+- **SDK → CI / test logs**: committed tests use public upstream or
+  de-identified fixtures. CI and release jobs do not inject live Turnkey
+  credentials.
 
 ## Threats and mitigations
 
 | ID | Threat | Mitigation |
 |---|---|---|
-| T-1 | Signing path produces a payload that differs by a single byte from what Turnkey expects (canonical JSON drift) | Golden fixtures generated from pinned Node packages; byte-compared in tests. |
+| T-1 | Signing path produces a payload that differs by a single byte from what Turnkey expects (canonical JSON drift) | Exact C# request-body assertions, ordered-property assertions, and signature verification cover the supported request builders. Node-generated HTTP body byte parity remains an explicit gap. |
 | T-2 | ECDSA signature is not canonical low-S | Explicit low-S normalization; the deterministic Node fixture verifies identical `r`, the `s ↔ (n - s)` relationship, and both signatures. |
 | T-3 | HPKE shared-secret derivation off by one constant or label, garbles bundle decrypt | C# round-trip tests plus pinned upstream credential/export bundle fixtures. Fixed-ephemeral RFC 9180 byte equality remains an explicit gap. |
 | T-4 | HKDF Extract / Expand off-by-one or wrong info ordering | RFC 5869 SHA-256 test cases A.1-A.3. |
 | T-5 | Caller passes a leading-zero P-256 scalar; BigInteger drops the leading zero, corrupts signature | leading-zero unit tests; explicit pad-to-32 helper used everywhere. |
 | T-6 | AES-GCM tag/nonce/AAD layout drift vs noble | Exercised by HPKE round-trip tests and pinned Turnkey bundle fixtures. |
-| T-7 | JSON serialization picks up unexpected property order, breaks Turnkey-side `SHA-256(body)` | source-generated JSON only via `TurnkeyJsonContext`; golden fixtures byte-compared. |
+| T-7 | JSON serialization picks up unexpected property order, breaks Turnkey-side `SHA-256(body)` | Signed wire paths use explicit source-generated `JsonTypeInfo`; tests assert the exact `whoami` body and property order for supported DTOs. Cross-runtime Node HTTP byte parity remains an explicit gap. |
 | T-8 | Reflection-based serialization path falls back at runtime under trimming, breaks signing | Signed wire paths use explicit source-generated `JsonTypeInfo`; a dedicated trimmed/AOT smoke test remains a documented gap. |
 | T-9 | A future BouncyCastle bump silently changes ECDSA / AES-GCM semantics | exact pin via `[2.5.0]`; `packages.lock.json` committed. |
 | T-10 | Test fixtures contain real org credentials | Only public upstream test vectors are retained and labeled; OSS-readiness scans review credential-shaped content. |
-| T-11 | CI logs include signed payloads | secrets via env, no `echo` of payload, fixtures de-identified. |
-| T-12 | E2E live test against Turnkey leaks the test-org credentials | E2E gated behind env-var presence; not run by default; CI scrubs logs. |
+| T-11 | CI logs include signed payloads or live credentials | CI uses committed public/de-identified fixtures, does not inject live Turnkey credentials, and does not echo generated payloads. |
+| T-12 | A future live-backend test leaks its test-org credentials | No live-backend harness is currently committed. Any future E2E path must use a separate manually triggered workflow, a protected environment, and sanitized logging. |
 
 ## Things this SDK does NOT do
 

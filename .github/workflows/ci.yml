@@ -33,23 +33,25 @@ jobs:
         run: dotnet build turnkey-sdk-csharp.sln -c Release --no-restore
 
       - name: Test (Release, with coverage)
-        env:
-          # E2E tests skip themselves if these are unset
-          TURNKEY_TEST_ORG_API_KEY: ${{ secrets.TURNKEY_TEST_ORG_API_KEY }}
-          TURNKEY_TEST_ORG_ID: ${{ secrets.TURNKEY_TEST_ORG_ID }}
         run: |
           dotnet test turnkey-sdk-csharp.sln -c Release --no-build \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults \
             --logger "trx;LogFileName=test-results.trx"
 
-      - name: Verify pinned upstream source checksums
+      - name: Source checksum gate regression tests
+        run: ./tools/compatibility/tests/source-checksums-test.sh
+
+      - name: Verify pinned upstream source checksums and package set
         run: ./tools/compatibility/verify-source-checksums.sh
 
       # Compatibility-coverage gate: every upstream __tests__/*.ts test()
       # block must either map to a C# [Fact]/[Theory] via a /// upstream:
       # XML doc annotation, or be listed in coverage-map.na.tsv with a
       # non-empty public rationale.
+      - name: Coverage map gate regression tests
+        run: ./tools/compatibility/tests/coverage-map-test.sh
+
       - name: Coverage map gate (upstream test ↔ C# test)
         run: ./tools/compatibility/coverage-map.sh --check
 
@@ -96,18 +98,36 @@ jobs:
       - name: Pack (Release)
         run: |
           dotnet pack src/turnkey-sdk-csharp.csproj -c Release \
-            --no-restore --output ./artifacts
-      - name: Validate NuGet contents (README, licenses, NOTICE)
+            --no-restore --output ./artifacts \
+            /p:IncludeSymbols=true \
+            /p:SymbolPackageFormat=snupkg
+      - name: Validate NuGet contents (strict paths, both TFMs)
         run: |
           set -euo pipefail
-          NUPKG=$(ls ./artifacts/KyuzanInc.Turnkey.Sdk.*.nupkg | head -1)
-          CONTENTS_FILE="$RUNNER_TEMP/package-contents.txt"
-          echo "Validating $NUPKG"
-          unzip -l "$NUPKG" | tee "$CONTENTS_FILE"
-          grep -q 'README.md' "$CONTENTS_FILE"
-          grep -q 'LICENSE'   "$CONTENTS_FILE"
-          grep -q 'NOTICE'    "$CONTENTS_FILE"
-          grep -q 'LICENSES/Apache-2.0.txt' "$CONTENTS_FILE"
+          NUPKG=$(find ./artifacts -maxdepth 1 -type f \
+            -name 'KyuzanInc.Turnkey.Sdk.*.nupkg' ! -name '*.snupkg' \
+            -print -quit)
+          SNUPKG=$(find ./artifacts -maxdepth 1 -type f \
+            -name 'KyuzanInc.Turnkey.Sdk.*.snupkg' -print -quit)
+          test -n "$NUPKG"  || { echo "::error::nupkg missing";  exit 1; }
+          test -n "$SNUPKG" || { echo "::error::snupkg missing"; exit 1; }
+
+          nupkg_paths=$(unzip -Z1 "$NUPKG")
+          echo "$nupkg_paths"
+          for required_path in README.md LICENSE NOTICE LICENSES/Apache-2.0.txt \
+                               lib/netstandard2.1/KyuzanInc.Turnkey.Sdk.dll \
+                               lib/net8.0/KyuzanInc.Turnkey.Sdk.dll; do
+            echo "$nupkg_paths" | grep -Fxq "$required_path" \
+              || { echo "::error::nupkg is missing exact path '$required_path'"; exit 1; }
+          done
+
+          snupkg_paths=$(unzip -Z1 "$SNUPKG")
+          echo "$snupkg_paths"
+          for required_path in lib/netstandard2.1/KyuzanInc.Turnkey.Sdk.pdb \
+                               lib/net8.0/KyuzanInc.Turnkey.Sdk.pdb; do
+            echo "$snupkg_paths" | grep -Fxq "$required_path" \
+              || { echo "::error::snupkg is missing exact path '$required_path'"; exit 1; }
+          done
       - name: Upload .nupkg + .snupkg artifacts
         uses: actions/upload-artifact@v7
         with:

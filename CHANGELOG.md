@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Turnkey source and fixtures.
 - Rewrote the README and contribution guidance for OSS consumers while keeping
   GitHub Packages as the only package registry.
+- Hardened the compatibility coverage gate against non-test/skip false
+  positives and stale generated evidence, made source-package and drift issue
+  handling fail closed, and aligned CI package inspection with the strict
+  release checks.
 
 ## [0.1.0-alpha.0] — 2026-05-23
 
@@ -32,8 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@turnkey/crypto@2.8.8`:
   - P-256 key pair generation (`GenerateP256KeyPair`, `GetPublicKey`).
   - HPKE-Base mode encrypt / decrypt (`HpkeEncrypt`, `HpkeDecrypt`)
-    using P-256 / HKDF-SHA256 / AES-128-GCM, with the labelled
-    using the pinned upstream `crypto.ts` information construction.
+    using P-256 / HKDF-SHA256 / AES-128-GCM and the pinned upstream
+    `crypto.ts` labelled information construction.
   - Tonelli-Shanks modular square root (`Math.ModSqrt`) for point
     decompression.
   - RFC 5869 HKDF-HMAC-SHA256 (`Hkdf.Extract`, `Hkdf.Expand`) ported

@@ -7,15 +7,22 @@ stored transcript from any particular review tool.
 
 | Layer | Evidence | Enforcement |
 |---|---|---|
-| Upstream source integrity | Pinned TypeScript sources and SHA-256 manifest | `./tools/compatibility/verify-source-checksums.sh` and CI |
+| Upstream source integrity | Pinned TypeScript sources, the four-package set, and SHA-256 manifest | `./tools/compatibility/tests/source-checksums-test.sh`, `./tools/compatibility/verify-source-checksums.sh`, and CI |
 | Upstream test coverage | Each upstream test maps to a C# test or a reasoned N/A row | `./tools/compatibility/coverage-map.sh --check` and CI |
+| Coverage-gate integrity | Ordinary or skipped methods cannot satisfy mappings; generated outputs cannot be stale | `./tools/compatibility/tests/coverage-map-test.sh` and CI |
 | Published-package provenance | Exact npm versions and tarball SHA-256 values | [`upstream-pins.md`](./upstream-pins.md) and [`package-checksums.txt`](../../tests/UpstreamSources/package-checksums.txt) |
 | Wire/fixture behavior | Committed JSON fixtures and C# assertions | `dotnet test -c Release` |
 | Primitive reference tests | RFC 5869 HKDF and existing crypto vectors | `tests/CryptoTests.cs` |
 | Package integrity | Locked restore, build, test, pack, archive validation | CI and release workflows |
 
 The generated [coverage map](./coverage-map.md) must contain zero `MISSING`
-rows and every N/A row must have a non-empty explanation.
+rows, every N/A row must have a non-empty explanation, and the committed TSV
+and Markdown outputs must match a fresh generation.
+
+The retained-source package set and `package-checksums.txt` must match the exact
+four pinned package-version identifiers. Tarball checksum fields must be
+lowercase 64-character SHA-256 hex strings. Removing or substituting a package
+snapshot and its manifest rows is a gate failure, not a zero-drift result.
 
 ## Fixture regeneration
 
@@ -40,7 +47,7 @@ the .NET tests before accepting changes.
   externally fixed-ephemeral byte comparison to RFC 9180 remains unevaluated.
 - Standard-vector coverage is incomplete beyond the committed HKDF and
   existing curve/vector tests.
-- Live Turnkey backend tests are opt-in and are not a CI substitute.
+- No live Turnkey backend test harness is currently committed.
 - Proof fixtures validate provenance and structure only; no proof verifier is
   included.
 

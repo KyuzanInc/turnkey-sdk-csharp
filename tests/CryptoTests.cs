@@ -11,7 +11,8 @@
 // EncryptPrivateKeyToBundle, DecryptExportBundle against PRODUCTION_SIGNER)
 // are not unit-testable without a real Turnkey signing key. They are
 // implicitly exercised by the HPKE roundtrip (the inner HPKE step is
-// identical) and by the E2E whoami flow once credentials are present.
+// identical) and by pinned upstream decrypt fixtures. No live-backend test
+// harness is committed.
 
 using System;
 using System.Text;

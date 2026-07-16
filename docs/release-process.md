@@ -316,7 +316,15 @@ One-time admin task on the repo settings → Branches → `main`:
 - **Allow force pushes**: disabled.
 - **Allow deletions**: disabled.
 
-`Repo privacy check` runs on `push: main` and the weekly cron, not on
-`pull_request`. Do NOT include it in the required-check list (PRs
-cannot satisfy it). The post-merge / weekly-cron runs catch accidental
-public-visibility flips on the next trigger, not instantly.
+Repository visibility is not a required PR check and is not continuously
+changed or monitored by a workflow in this repository. Before a public release
+announcement, an administrator must verify the current setting explicitly:
+
+```bash
+gh repo view KyuzanInc/turnkey-sdk-csharp \
+  --json visibility \
+  --jq '.visibility'
+```
+
+This is a read-only check. Visibility changes remain a separate administrator
+operation and are never implied by the release procedure.

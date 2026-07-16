@@ -79,8 +79,14 @@ curl -sf -H "Authorization: Bearer $GH_TOKEN" \
 - All PRs must pass:
   - `Build + test (ubuntu-latest, net8.0 runner)` — `dotnet test` 0 failures,
     coverage ≥ 30% combined-TFM (alpha threshold).
-  - `Coverage map gate (upstream test ↔ C# test)` — `tools/compatibility/coverage-map.sh --check`
-    returns 0 MISSING and 0 empty N/A reasons.
+  - `Source checksum gate` —
+    `tools/compatibility/tests/source-checksums-test.sh` passes and
+    `tools/compatibility/verify-source-checksums.sh` verifies all four pinned
+    packages, retained paths, and SHA-256 values.
+  - `Coverage map gate (upstream test ↔ C# test)` —
+    `tools/compatibility/tests/coverage-map-test.sh` passes and
+    `tools/compatibility/coverage-map.sh --check` returns 0 MISSING,
+    0 empty N/A reasons, and current committed outputs.
   - `Verify conventional commit title` — PR title matches
     `^(feat|fix|deps|docs|ci|chore|refactor|test)(\([^)]+\))?!?: (.+)$`.
   - `autolabel` (informational).
@@ -94,7 +100,11 @@ curl -sf -H "Authorization: Bearer $GH_TOKEN" \
 
 - All PRs that change pinned upstream versions must update
   [`docs/compatibility/upstream-pins.md`](./docs/compatibility/upstream-pins.md),
-  regenerate `tests/UpstreamSources/source-file-checksums.txt`, and re-run the
+  `tests/UpstreamSources/package-checksums.txt`, and the exact package lists in
+  `tools/compatibility/verify-source-checksums.sh` and
+  `tools/compatibility/tests/source-checksums-test.sh`; update the matching
+  `.github/workflows/upstream-drift.yml` matrix entry; regenerate
+  `tests/UpstreamSources/source-file-checksums.txt`; and re-run the
   upstream-drift and compatibility verification described in
   [`docs/compatibility/verification.md`](./docs/compatibility/verification.md).
 

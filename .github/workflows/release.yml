@@ -116,9 +116,6 @@ jobs:
             /p:SymbolPackageFormat=snupkg
 
       - name: Test
-        env:
-          TURNKEY_TEST_ORG_API_KEY: ${{ secrets.TURNKEY_TEST_ORG_API_KEY }}
-          TURNKEY_TEST_ORG_ID:      ${{ secrets.TURNKEY_TEST_ORG_ID }}
         run: dotnet test turnkey-sdk-csharp.sln -c Release --no-build
 
       - name: Pack

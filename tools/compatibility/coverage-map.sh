@@ -4,9 +4,9 @@
 #
 # Modes:
 #   coverage-map.sh           — write coverage-map.tsv + coverage-map.md (no gate)
-#   coverage-map.sh --check   — write outputs AND exit non-zero if any
-#                                upstream test is MISSING from C# coverage and
-#                                has no N/A reason recorded in coverage-map.na.tsv.
+#   coverage-map.sh --check   — generate into temporary files and exit non-zero
+#                                if an upstream test is MISSING, an N/A reason is
+#                                empty, or the committed outputs are stale.
 #
 # Inputs:
 #   tests/UpstreamSources/*/ts-source/__tests__/*-test*.ts
@@ -37,12 +37,24 @@ COMPAT_DIR="$REPO_ROOT/tools/compatibility"
 UPSTREAM_DIR="$REPO_ROOT/tests/UpstreamSources"
 TESTS_DIR="$REPO_ROOT/tests"
 NA_FILE="$COMPAT_DIR/coverage-map.na.tsv"
-TSV_OUT="$COMPAT_DIR/coverage-map.tsv"
-MD_OUT="$REPO_ROOT/docs/compatibility/coverage-map.md"
+CANONICAL_TSV_OUT="$COMPAT_DIR/coverage-map.tsv"
+CANONICAL_MD_OUT="$REPO_ROOT/docs/compatibility/coverage-map.md"
 
 CHECK_MODE=0
 if [[ "${1:-}" == "--check" ]]; then
   CHECK_MODE=1
+fi
+
+CHECK_TSV_OUT=""
+CHECK_MD_OUT=""
+if [[ "$CHECK_MODE" = "1" ]]; then
+  CHECK_TSV_OUT="$(mktemp)"
+  CHECK_MD_OUT="$(mktemp)"
+  TSV_OUT="$CHECK_TSV_OUT"
+  MD_OUT="$CHECK_MD_OUT"
+else
+  TSV_OUT="$CANONICAL_TSV_OUT"
+  MD_OUT="$CANONICAL_MD_OUT"
 fi
 
 cd "$REPO_ROOT"
@@ -59,10 +71,9 @@ cd "$REPO_ROOT"
 # -------------------------------------------------------------------
 
 TMP_UPSTREAM="$(mktemp)"
-trap 'rm -f "$TMP_UPSTREAM" "$TMP_MAPPED" "$TMP_NA" "$TMP_REPORT" 2>/dev/null || true' EXIT
 TMP_MAPPED="$(mktemp)"
 TMP_NA="$(mktemp)"
-TMP_REPORT="$(mktemp)"
+trap 'rm -f "$TMP_UPSTREAM" "$TMP_MAPPED" "$TMP_NA" "$CHECK_TSV_OUT" "$CHECK_MD_OUT" 2>/dev/null || true' EXIT
 
 # Use find -print0 + xargs is safer for spaces but our path tree has no spaces.
 # Keep simple: glob expansion with sorted ordering.
@@ -129,8 +140,13 @@ for f in "$TESTS_DIR"/*Tests.cs; do
   [ -f "$f" ] || continue
   rel="${f#$REPO_ROOT/}"
   awk -v csfile="$rel" '
-    function reset_pending() { delete pending; pending_n=0 }
-    BEGIN { pending_n=0 }
+    function reset_pending() {
+      delete pending
+      pending_n=0
+      has_test_attribute=0
+      is_skipped=0
+    }
+    BEGIN { reset_pending() }
     /^[[:space:]]*\/\/\/[[:space:]]*upstream:[[:space:]]/ {
       # parse: /// upstream: <key> [..."<name>"]
       # capture the first space-delimited token after "upstream:"
@@ -143,22 +159,33 @@ for f in "$TESTS_DIR"/*Tests.cs; do
       pending[pending_n]=key
       next
     }
+    pending_n > 0 && /^[[:space:]]*\[(Fact|Theory)(Attribute)?([[:space:]]|\(|\])/ {
+      has_test_attribute=1
+      if ($0 ~ /Skip[[:space:]]*=/) is_skipped=1
+      next
+    }
+    pending_n > 0 && /^[[:space:]]*\[/ {
+      if ($0 ~ /Skip[[:space:]]*=/) is_skipped=1
+      next
+    }
+    pending_n > 0 && /^[[:space:]]*$/ { next }
+    pending_n > 0 && /^[[:space:]]*\/\/\// { next }
     /^[[:space:]]*public[[:space:]]+(async[[:space:]]+)?(void|Task)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(/ {
-      if (pending_n > 0) {
+      if (pending_n > 0 && has_test_attribute && !is_skipped) {
         s=$0
         sub(/^[[:space:]]*public[[:space:]]+(async[[:space:]]+)?(void|Task)[[:space:]]+/, "", s)
         sub(/[[:space:]]*\(.*$/, "", s)
         for (i=1; i<=pending_n; i++) {
           printf("%s\t%s:%d\t%s\n", pending[i], csfile, NR, s)
         }
-        reset_pending()
       }
+      reset_pending()
       next
     }
-    # If we see a non-comment non-attribute line before the public decl,
-    # drop any pending annotations (defensive: prevents drift if a /// upstream
-    # comment sits orphaned at the end of a region without a matching method).
-    /^[[:space:]]*\}/ && pending_n > 0 { reset_pending() }
+    # Any other code before the public test declaration invalidates the
+    # annotation. This prevents ordinary methods and skipped tests from
+    # satisfying the compatibility gate.
+    pending_n > 0 { reset_pending() }
   ' "$f"
 done > "$TMP_MAPPED"
 
@@ -293,8 +320,24 @@ if [ "$CHECK_MODE" = "1" ]; then
     awk -F '\t' 'NR>1 && $3=="N/A" && ($6=="" || $6 ~ /^[[:space:]]*$/) { print "  EMPTY-NA-REASON: " $1 "  " $2 }' "$TSV_OUT"
     exit_code=1
   fi
+  if [[ ! -f "$CANONICAL_TSV_OUT" ]] || ! cmp -s "$CANONICAL_TSV_OUT" "$TSV_OUT"; then
+    echo "ERROR: committed coverage map is out of date: $CANONICAL_TSV_OUT"
+    if [[ -f "$CANONICAL_TSV_OUT" ]]; then
+      diff -u "$CANONICAL_TSV_OUT" "$TSV_OUT" || true
+    fi
+    echo "Run ./tools/compatibility/coverage-map.sh and commit the result."
+    exit_code=1
+  fi
+  if [[ ! -f "$CANONICAL_MD_OUT" ]] || ! cmp -s "$CANONICAL_MD_OUT" "$MD_OUT"; then
+    echo "ERROR: committed coverage map is out of date: $CANONICAL_MD_OUT"
+    if [[ -f "$CANONICAL_MD_OUT" ]]; then
+      diff -u "$CANONICAL_MD_OUT" "$MD_OUT" || true
+    fi
+    echo "Run ./tools/compatibility/coverage-map.sh and commit the result."
+    exit_code=1
+  fi
   if [ "$exit_code" = "0" ]; then
-    echo "coverage-map check passed: 0 MISSING, all N/A rows have reasons."
+    echo "coverage-map check passed: 0 MISSING, all N/A rows have reasons, committed outputs are current."
   fi
   exit "$exit_code"
 fi

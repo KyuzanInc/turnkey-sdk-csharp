@@ -47,14 +47,24 @@ When changing a pin:
 1. Run `npm pack <package>@<version>` in a temporary directory.
 2. Verify and record the tarball SHA-256 in this file and
    `tests/UpstreamSources/package-checksums.txt`.
-3. Resolve and record the matching upstream Git commit.
-4. Refresh the matching `tests/UpstreamSources/<package-version>/ts-source/`
+3. Update the exact package-version lists in
+   `tools/compatibility/verify-source-checksums.sh` and
+   `tools/compatibility/tests/source-checksums-test.sh`.
+4. Update the matching `.github/workflows/upstream-drift.yml` matrix entry:
+   `package`, `git_tag_sha`, and `tarball_dir` are mandatory; update `owner`
+   and `repo` if the upstream location changed.
+5. Resolve and record the matching upstream Git commit.
+6. Refresh the matching `tests/UpstreamSources/<package-version>/ts-source/`
    tree and `package.json`.
-5. Regenerate `tests/UpstreamSources/source-file-checksums.txt` and run
+7. Regenerate `tests/UpstreamSources/source-file-checksums.txt` and run
+   `./tools/compatibility/tests/source-checksums-test.sh` followed by
    `./tools/compatibility/verify-source-checksums.sh`.
-6. Re-run `./tools/compatibility/coverage-map.sh --check`, fixture generators,
+8. Re-run `./tools/compatibility/coverage-map.sh --check`, fixture generators,
    the full .NET test suite, and an independent code review of affected files.
-7. Update `CHANGELOG.md` and compatibility documentation.
+9. Update `CHANGELOG.md` and compatibility documentation.
+10. After the repin is merged, run the `Upstream drift detection` workflow
+    manually on `main` and confirm every package-matrix job succeeds. This
+    verifies the periodic monitor uses the new package path and Git commit.
 
 Do not update only the readable source snapshot: a repin is incomplete until
 the npm tarball hash, Git commit, tests, and documentation agree.
