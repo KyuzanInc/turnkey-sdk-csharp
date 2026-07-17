@@ -20,8 +20,8 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET 8
-        # actions/setup-dotnet v5.2.0 — see .github/pin-actions.txt
-        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+        # actions/setup-dotnet v6.0.0 — see .github/pin-actions.txt
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: 8.0.x
 
@@ -105,8 +105,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
-      # actions/setup-dotnet v5.2.0 — see .github/pin-actions.txt
-      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
+      # actions/setup-dotnet v6.0.0 — see .github/pin-actions.txt
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: 8.0.x
       - name: Restore (locked-mode)
