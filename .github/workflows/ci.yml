@@ -14,7 +14,7 @@ jobs:
     name: Build + test (ubuntu-latest, net8.0 runner)
     runs-on: ubuntu-latest
     steps:
-      # actions/checkout v6.0.2 — see .github/pin-actions.txt
+      # actions/checkout v7.0.0 — see .github/pin-actions.txt
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           persist-credentials: false
@@ -101,7 +101,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-test
     steps:
-      # actions/checkout v6.0.2 — see .github/pin-actions.txt
+      # actions/checkout v7.0.0 — see .github/pin-actions.txt
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           persist-credentials: false
