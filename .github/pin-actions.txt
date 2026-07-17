@@ -20,8 +20,8 @@ actions/checkout
                   upstream-drift.yml
 
 actions/setup-dotnet
-  pinned_sha:     c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
-  pinned_tag:     v5.2.0
+  pinned_sha:     a98b56852c35b8e3190ac28c8c2271da59106c68
+  pinned_tag:     v6.0.0
   used_in:        ci.yml
                   consumer-smoke.yml
                   release.yml
