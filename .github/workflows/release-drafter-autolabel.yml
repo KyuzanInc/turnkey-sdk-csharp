@@ -55,7 +55,7 @@ jobs:
           done
 
       # release-drafter v7.3.0 autolabeler subpath
-      - uses: release-drafter/release-drafter/autolabeler@da8b9b696abad2ad997580e49f4c1c2e03cc2bd2
+      - uses: release-drafter/release-drafter/autolabeler@c2e2804cc59f45f57076a99af580d0fedb697927
         with:
           config-name: release-drafter.yml
         env:
