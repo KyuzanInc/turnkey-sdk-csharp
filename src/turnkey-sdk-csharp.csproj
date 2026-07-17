@@ -6,10 +6,10 @@
 
     <!-- NuGet packaging -->
     <PackageId>KyuzanInc.Turnkey.Sdk</PackageId>
-    <Version>0.1.0-alpha.0</Version>
+    <Version>1.0.0</Version>
     <Authors>Kyuzan Inc.</Authors>
     <Company>Kyuzan Inc.</Company>
-    <Description>Unofficial, community-maintained Turnkey SDK for .NET by Kyuzan Inc. Not affiliated with Turnkey, Inc. A logical compatibility port of explicitly pinned @turnkey/crypto, @turnkey/http, @turnkey/api-key-stamper, and @turnkey/encoding versions. Provides P-256 ECDSA, HPKE, HKDF, and API-key stamping primitives for .NET.</Description>
+    <Description>Unofficial, community-maintained Turnkey SDK for .NET by Kyuzan Inc. Not affiliated with Turnkey, Inc. A logical compatibility port of the documented supported subset of explicitly pinned @turnkey/crypto, @turnkey/http, @turnkey/api-key-stamper, and @turnkey/encoding versions. Provides P-256 ECDSA, HPKE, HKDF, and API-key stamping primitives for .NET.</Description>
     <PackageProjectUrl>https://github.com/KyuzanInc/turnkey-sdk-csharp</PackageProjectUrl>
     <PackageLicenseExpression>MIT AND Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>

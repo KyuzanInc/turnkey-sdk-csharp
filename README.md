@@ -7,8 +7,8 @@
 requests and handle Turnkey credential, import, and export bundles. It targets
 `netstandard2.1` and `net8.0`.
 
-The implementation is a logical compatibility port of explicitly pinned
-Turnkey TypeScript packages:
+The implementation is a logical compatibility port of the documented,
+supported subset of explicitly pinned Turnkey TypeScript packages:
 
 | Upstream package | Version |
 |---|---:|
@@ -24,10 +24,12 @@ The authoritative Turnkey TypeScript SDK is
 
 ## Status and distribution
 
-The library is currently prerelease software. Packages are published to
-**GitHub Packages only**; this repository does not publish to nuget.org.
-GitHub Packages requires authentication with `read:packages`, including for
-public-source consumers.
+Version `1.0.0` is the first stable release of the documented supported API
+surface. Packages are published to **GitHub Packages only**; this repository
+does not publish to nuget.org. The GitHub Packages entry is intentionally
+private, so consumers need both package access and authentication with
+`read:packages`. GitHub Releases and CI runs do not attach downloadable
+`.nupkg` or `.snupkg` binaries.
 
 The supported API boundary and known verification gaps are explicit in:
 
@@ -81,7 +83,7 @@ Set `KYUZAN_GH_USER` and a classic GitHub PAT with `read:packages`, then add
 the desired published version:
 
 ```bash
-dotnet add package KyuzanInc.Turnkey.Sdk --version 0.1.0-alpha.1
+dotnet add package KyuzanInc.Turnkey.Sdk --version 1.0.0
 ```
 
 See [`docs/release-process.md`](./docs/release-process.md) for consumer access
@@ -163,6 +165,9 @@ See the [`ADR index`](./docs/adr/README.md) for rationale and alternatives.
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Changes to upstream pins,
 cryptography, or signed wire formats must update the corresponding fixtures,
 coverage map, compatibility documentation, and ADRs when the decision changes.
+
+Security vulnerabilities must be reported privately as described in
+[`SECURITY.md`](./SECURITY.md), not through a public issue.
 
 ## License and attribution
 

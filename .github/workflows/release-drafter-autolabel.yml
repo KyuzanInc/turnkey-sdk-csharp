@@ -16,6 +16,11 @@ permissions:
 
 jobs:
   autolabel:
+    # Fork pull requests receive a read-only token. Skip write-based labeling
+    # instead of failing an otherwise valid external contribution workflow.
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN:  ${{ secrets.GITHUB_TOKEN }}

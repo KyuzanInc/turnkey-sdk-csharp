@@ -59,6 +59,7 @@ Caller code ──► turnkey-sdk-csharp ──► HTTPS Turnkey API
 - Does not implement `ISecureStorage`, Keychain, KeyStore, DPAPI, or any OS
   keystore wrapper.
 - Does not provide retry / backoff / circuit breakers; that is caller scope.
-- Does not handle WebAuthn / passkey stamping (out of v0.1.0 scope).
+- Does not handle WebAuthn / passkey stamping (outside the supported `1.0.0`
+  API surface).
 - Does not handle Google OAuth, OTP, or any higher-level identity flow.
   Those belong to the consuming application.

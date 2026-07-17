@@ -16,3 +16,4 @@ Status values:
 | [0002](./0002-supported-api-surface-and-coverage.md) | Maintain a deliberately scoped API with reasoned coverage exclusions | Accepted |
 | [0003](./0003-cryptographic-adaptation-policy.md) | Limit BouncyCastle to primitives and normalize P-256 signatures to low-S | Accepted |
 | [0004](./0004-deterministic-json-wire-format.md) | Use source-generated, deterministic JSON for signed wire bytes | Accepted |
+| [0005](./0005-public-source-private-package-distribution.md) | Separate public source from private package distribution | Accepted |

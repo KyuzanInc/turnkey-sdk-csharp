@@ -6,9 +6,10 @@ name: Consumer install smoke
 # Turnkey.Crypto + Turnkey.ApiKeyStamper).
 #
 # This is the canonical "consumer in a GitHub Actions job" pattern
-# documented in docs/release-process.md §5. The runner-issued
-# `secrets.GITHUB_TOKEN` carries `read:packages` for the same org by
-# default, so no PAT is needed.
+# documented in docs/release-process.md §5. While the source repository is
+# private, the bootstrap release may use `secrets.GITHUB_TOKEN`. After the
+# source becomes public, a dedicated read-only package token and username are
+# required so package access never extends to public-repository forks.
 #
 # Two trigger paths:
 #
@@ -28,9 +29,9 @@ on:
   workflow_dispatch:
     inputs:
       package_version:
-        description: "Version to install (e.g. 0.1.0-alpha.0)"
+        description: "Version to install (e.g. 1.0.0)"
         required: true
-        default: "0.1.0-alpha.0"
+        default: "1.0.0"
       tfm:
         description: "Target framework moniker"
         required: true
@@ -55,7 +56,34 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
+    environment: github-packages-read
+    env:
+      CONSUMER_ROOT: ${{ runner.temp }}/turnkey-consumer
+      NUGET_PACKAGES: ${{ runner.temp }}/turnkey-consumer/packages
     steps:
+      - name: Require a dedicated read token for public source verification
+        env:
+          GH_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
+          OWNER_REPO:      ${{ github.repository }}
+          DEDICATED_TOKEN: ${{ secrets.NUGET_READ_TOKEN }}
+          DEDICATED_USER:  ${{ secrets.NUGET_READ_USERNAME }}
+        run: |
+          set -euo pipefail
+          live_visibility=$(gh api "repos/${OWNER_REPO}" --jq .visibility)
+          case "$live_visibility" in
+            private) ;;
+            public|internal)
+              if [[ -z "$DEDICATED_TOKEN" || -z "$DEDICATED_USER" ]]; then
+                echo "::error::NUGET_READ_TOKEN and NUGET_READ_USERNAME are required when the source repository is not private."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Unknown live repository visibility; refusing package access."
+              exit 1
+              ;;
+          esac
+
       # Resolve which package version + TFM this run should install.
       # `workflow_run` events do not populate the `inputs` context
       # (`inputs` is only available for `workflow_dispatch` and
@@ -85,7 +113,7 @@ jobs:
             # workflow only triggers on `release: published`, so
             # `workflow_run.event` MUST be 'release' and
             # `workflow_run.head_branch` is the tag ref short name
-            # (e.g. 'v0.1.0-alpha.0'). Refuse anything else.
+            # (e.g. 'v1.0.0'). Refuse anything else.
             if [[ "$WR_EVENT" != "release" ]]; then
               echo "::error::Unexpected upstream workflow_run.event '$WR_EVENT' (expected 'release'). Refusing to run."
               exit 1
@@ -124,42 +152,65 @@ jobs:
           TFM: ${{ steps.resolve.outputs.tfm }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/consumer && cd /tmp/consumer
+          mkdir -p "$CONSUMER_ROOT" && cd "$CONSUMER_ROOT"
           dotnet new console --framework "$TFM" --name TurnkeySdkConsumer --force
 
       - name: Configure GitHub Packages source via dotnet nuget add source
         env:
-          GH_ACTOR: ${{ github.actor }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ secrets.NUGET_READ_USERNAME || github.actor }}
+          GH_TOKEN: ${{ secrets.NUGET_READ_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          cd /tmp/consumer/TurnkeySdkConsumer
-          # Write the source with credentials into a LOCAL NuGet.config.
-          # Using `dotnet nuget add source` lets the CLI handle escaping
-          # of the URL/username/token. The resulting NuGet.config
-          # contains the token in clear text, which is acceptable here
-          # because (a) the file lives inside an ephemeral runner only,
-          # and (b) `secrets.GITHUB_TOKEN` is automatically revoked at
-          # job end.
+          cat > "$CONSUMER_ROOT/NuGet.Config" <<'NUGET_CONFIG'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+            <packageSourceMapping>
+              <packageSource key="nuget.org">
+                <package pattern="*" />
+              </packageSource>
+              <packageSource key="kyuzan-github">
+                <package pattern="KyuzanInc.*" />
+              </packageSource>
+            </packageSourceMapping>
+          </configuration>
+          NUGET_CONFIG
+          # Pin the cleartext credential to an ephemeral, project-local
+          # config. Without --configfile, dotnet would persist it in the
+          # runner user's global NuGet.Config.
           dotnet nuget add source \
             "https://nuget.pkg.github.com/KyuzanInc/index.json" \
             --name kyuzan-github \
             --username "$GH_ACTOR" \
             --password "$GH_TOKEN" \
-            --store-password-in-clear-text
+            --store-password-in-clear-text \
+            --configfile "$CONSUMER_ROOT/NuGet.Config"
 
       - name: Install KyuzanInc.Turnkey.Sdk
         env:
           VERSION: ${{ steps.resolve.outputs.package_version }}
         run: |
           set -euo pipefail
-          cd /tmp/consumer/TurnkeySdkConsumer
+          cd "$CONSUMER_ROOT/TurnkeySdkConsumer"
           dotnet add package KyuzanInc.Turnkey.Sdk --version "$VERSION"
+          metadata="$NUGET_PACKAGES/kyuzaninc.turnkey.sdk/${VERSION}/.nupkg.metadata"
+          test -f "$metadata" || { echo "::error::Package restore metadata is missing."; exit 1; }
+          jq -e \
+            --arg source "https://nuget.pkg.github.com/KyuzanInc/index.json" \
+            '.source == $source' "$metadata" >/dev/null \
+            || { echo "::error::Package was not restored from the authorized GitHub Packages feed."; exit 1; }
+
+      - name: Remove package credentials
+        if: always()
+        run: rm -f "$CONSUMER_ROOT/NuGet.Config"
 
       - name: Write sample Program.cs (exercises public API)
         run: |
           set -euo pipefail
-          cat > /tmp/consumer/TurnkeySdkConsumer/Program.cs <<'PROGRAM'
+          cat > "$CONSUMER_ROOT/TurnkeySdkConsumer/Program.cs" <<'PROGRAM'
           using System;
           using System.Linq;
           using Turnkey;
@@ -203,6 +254,6 @@ jobs:
       - name: Build + run consumer sample
         run: |
           set -euo pipefail
-          cd /tmp/consumer/TurnkeySdkConsumer
-          dotnet build -c Release
+          cd "$CONSUMER_ROOT/TurnkeySdkConsumer"
+          dotnet build -c Release --no-restore
           dotnet run -c Release --no-build
