@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-07-17
+
+### Added
+
+- Added a public security policy and automated NuGet/GitHub Actions dependency
+  update configuration for the stable release line.
+
+### Changed
+
+- Declared the documented supported API surface stable at `1.0.0`; unsupported
+  upstream APIs remain explicitly out of scope rather than implied compatible.
+- Kept package binaries in the private GitHub Packages registry. Public GitHub
+  Releases contain release notes and checksums, but no `.nupkg` or `.snupkg`
+  assets.
+- Hardened public contribution workflows with immutable action pins and safe
+  handling for pull requests from forks.
+
 ## [0.1.0-alpha.2] — 2026-07-17
 
 ### Changed

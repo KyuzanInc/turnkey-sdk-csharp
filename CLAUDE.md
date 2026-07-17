@@ -8,14 +8,16 @@ Project-specific instructions for Claude Code agents operating in this repo.
 `net8.0`. **Not a web app.** No production URL. The "deploy artifact" is a
 `.nupkg` published to GitHub Packages.
 
-The crypto logic is a logical compatibility port of explicitly pinned Turnkey
-TypeScript packages. See [`README.md`](./README.md) and
+The crypto logic is a logical compatibility port of the documented supported
+subset of explicitly pinned Turnkey TypeScript packages. See
+[`README.md`](./README.md) and
 [`docs/compatibility/upstream-pins.md`](./docs/compatibility/upstream-pins.md)
 for the exact pins and verification policy.
 
 ## Deploy Configuration (configured by /setup-deploy)
 
-- **Platform**: GitHub Releases → GitHub Packages (NuGet)
+- **Platform**: public GitHub Releases (notes + checksums) → private GitHub
+  Packages (NuGet)
 - **Package**: `KyuzanInc.Turnkey.Sdk`
 - **Production URL**: none (NuGet feed, not a website). Feed index is at
   `https://nuget.pkg.github.com/KyuzanInc/index.json` and requires
@@ -25,8 +27,11 @@ for the exact pins and verification policy.
     required; merging a PR to `main` alone does NOT trigger a deploy).
   - Steps: setup-dotnet 8.0.x → restore (locked-mode) → build (Release, both
     TFMs) → test → pack → validate `.nupkg` + `.snupkg` contents → preflight
-    existing Release assets → registry-driven duplicate check → publish to
-    `nuget.pkg.github.com` → write `release-checksums.txt`.
+    the public checksum asset → registry-driven duplicate check → publish to
+    private `nuget.pkg.github.com` → upload `release-checksums.txt` only.
+  - After source publication, package access inheritance stays disabled and
+    publishing requires the dedicated credentials documented in
+    `docs/release-process.md`; missing credentials fail closed.
 - **Post-deploy verification**: `.github/workflows/consumer-smoke.yml`
   - Trigger: `workflow_run` of `Release` (i.e. `release.yml`) completion.
   - Verifies the published package can be installed by a downstream consumer
@@ -35,8 +40,10 @@ for the exact pins and verification policy.
 - **Auto-deploy on merge**: **NO.** Merging a PR to `main` only triggers
   `ci.yml` (build + test + coverage gate + coverage-map gate). A release
   publish is an explicit, separate step.
-- **Merge method**: SQUASH (repo default; `viewerDefaultMergeMethod=SQUASH`).
-- **Branch protection on main**: relies on `ci.yml` and PR-title-lint passes.
+- **Merge method**: SQUASH only.
+- **Branch protection on main**: requires CI build/test, pack validation, and
+  PR-title-lint checks; linear history is enforced and force pushes/deletion are
+  disabled.
 
 ### Health check (used by /land-and-deploy after a PR merge)
 
@@ -78,7 +85,7 @@ curl -sf -H "Authorization: Bearer $GH_TOKEN" \
 
 - All PRs must pass:
   - `Build + test (ubuntu-latest, net8.0 runner)` — `dotnet test` 0 failures,
-    coverage ≥ 30% combined-TFM (alpha threshold).
+    coverage ≥ 30% combined-TFM.
   - `Source checksum gate` —
     `tools/compatibility/tests/source-checksums-test.sh` passes and
     `tools/compatibility/verify-source-checksums.sh` verifies all four pinned
@@ -87,6 +94,11 @@ curl -sf -H "Authorization: Bearer $GH_TOKEN" \
     `tools/compatibility/tests/coverage-map-test.sh` passes and
     `tools/compatibility/coverage-map.sh --check` returns 0 MISSING,
     0 empty N/A reasons, and current committed outputs.
+  - `Third-party action pin gate` —
+    `tools/tests/verify-action-pins-test.sh` passes and
+    `tools/verify-action-pins.sh` confirms every `.yml`/`.yaml` workflow action
+    uses a full commit SHA and `.github/pin-actions.txt` has the exact SHA and
+    workflow mapping.
   - `Verify conventional commit title` — PR title matches
     `^(feat|fix|deps|docs|ci|chore|refactor|test)(\([^)]+\))?!?: (.+)$`.
   - `autolabel` (informational).

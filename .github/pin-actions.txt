@@ -1,9 +1,8 @@
-# Third-party action pin manifest — release-related workflows only
+# Third-party action pin manifest — all workflows
 #
-# Every action used by release.yml, release-drafter-draft.yml,
-# release-drafter-autolabel.yml, and pr-title-lint.yml is pinned to a
-# full commit SHA. This file records the human-readable tag for each
-# pinned SHA so reviewers can verify pins without leaving the repo.
+# Every action used by the repository workflows is pinned to a full commit
+# SHA. This file records the human-readable tag for each pinned SHA so
+# reviewers can verify pins without leaving the repo.
 #
 # To bump a pin:
 #   1. Look up the desired release on GitHub.
@@ -12,24 +11,30 @@
 #   3. Update both the workflow YAML AND this file.
 #   4. Open a PR labeled `deps`.
 #
-# Scope: release-related workflows only. Pre-existing ci.yml hardening
-# is a follow-up TODO and NOT covered by this manifest.
-
 actions/checkout
   pinned_sha:     de0fac2e4500dabe0009e67214ff5f5447ce83dd
   pinned_tag:     v6.0.2
-  used_in:        release.yml
+  used_in:        ci.yml
+                  consumer-smoke.yml
+                  release.yml
+                  upstream-drift.yml
 
 actions/setup-dotnet
   pinned_sha:     c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7
   pinned_tag:     v5.2.0
-  used_in:        release.yml
+  used_in:        ci.yml
+                  consumer-smoke.yml
+                  release.yml
 
-actions/attest-build-provenance
-  pinned_sha:     a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
-  pinned_tag:     v4.1.0
-  used_in:        release.yml
-  notes:          Requires id-token:write + attestations:write permissions.
+actions/upload-artifact
+  pinned_sha:     043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+  pinned_tag:     v7.0.1
+  used_in:        ci.yml
+
+irongut/CodeCoverageSummary
+  pinned_sha:     51cc3a756ddcd398d447c044c02cb6aa83fdae95
+  pinned_tag:     v1.3.0
+  used_in:        ci.yml
 
 release-drafter/release-drafter
   pinned_sha:     da8b9b696abad2ad997580e49f4c1c2e03cc2bd2

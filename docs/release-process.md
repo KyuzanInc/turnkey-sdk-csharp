@@ -44,22 +44,19 @@ draft Release body.
 4. Pack (`.nupkg` + `.snupkg` with deterministic settings).
 5. Strict path validation of the `.nupkg` and `.snupkg` contents.
 6. Generate `release-checksums.txt`.
-7. **Preflight** (unconditional): byte-compare each existing Release
-   asset (`.nupkg`, `.snupkg`, `release-checksums.txt`) against the
-   locally-built bytes. Mismatch → FAIL.
+7. **Preflight** (unconditional): byte-compare an existing public
+   `release-checksums.txt` asset against the locally generated file.
+   Mismatch or any additional Release asset → FAIL.
 8. **Registry check**: download the existing `.nupkg` from
    `nuget.pkg.github.com` if the version exists; sha256-compare with
    local. Mismatch → FAIL. 404 → new publish.
-9. **Attestation**: `actions/attest-build-provenance` runs BEFORE
-   publish so that attestation failures abort before the immutable
-   registry write.
-10. **Publish** to GitHub Packages via `dotnet nuget push --no-symbols`
-    (only on new publish; safe-rerun skips this step).
-11. **Upload** `.nupkg` + `.snupkg` + `release-checksums.txt` as
-    Release assets.
+9. **Publish** to GitHub Packages via `dotnet nuget push --no-symbols`
+   (only on new publish; safe-rerun skips this step).
+10. **Upload** `release-checksums.txt` as the only Release asset.
 
-The Release page now hosts the package + symbols + checksums and the
-package is available at
+The Release page hosts release notes and checksums. Package and symbol binaries
+are not attached to the public Release; the `.nupkg` remains available only
+from the private GitHub Packages registry at
 `nuget.pkg.github.com/KyuzanInc/index.json`.
 
 ---
@@ -109,14 +106,13 @@ crash, etc.), you can re-trigger the same workflow run without bumping
 the version. The workflow detects the partial-publish state and
 decides what to do:
 
-| State | Registry has `vX.Y.Z` | Release has assets | Workflow does |
+| State | Registry has `vX.Y.Z` | Release has checksum | Workflow does |
 |---|---|---|---|
-| First attempt | No | No | Publish + upload assets |
-| Partial: attestation failed | No | No (attest blocked publish) | Publish + upload assets |
-| Partial: publish OK, asset upload failed | Yes (byte-equal) | No | Skip publish, upload assets |
-| Partial: publish OK, some assets uploaded | Yes (byte-equal) | Yes (byte-equal) | Skip publish, --clobber upload |
+| First attempt | No | No | Publish + upload checksum |
+| Partial: publish OK, checksum upload failed | Yes (byte-equal) | No | Skip publish, upload checksum |
+| Safe rerun | Yes (byte-equal) | Yes (byte-equal) | Skip publish, --clobber checksum |
 | Tamper: registry has DIFFERENT bytes | Yes (mismatch) | — | **FAIL**, bump version |
-| Tamper: Release asset has DIFFERENT bytes | — | Yes (mismatch) | **FAIL**, bump version |
+| Tamper: checksum file is DIFFERENT | — | Yes (mismatch) | **FAIL**, bump version |
 
 To re-trigger the Release workflow without re-publishing the Release:
 
@@ -160,14 +156,15 @@ dotnet nuget add source \
   --store-password-in-clear-text   # required on Linux/macOS
 
 # 3. Install (replace the example with the release you need):
-VERSION=0.1.0-alpha.1
+VERSION=1.0.0
 dotnet add package KyuzanInc.Turnkey.Sdk --version "$VERSION"
 ```
 
-### In GitHub Actions (same org)
+### In an authorized private downstream GitHub Actions repository
 
-The Actions-auto-issued `secrets.GITHUB_TOKEN` has `read:packages` for
-the same org by default:
+A private downstream repository that has been granted **Read** under the
+package's **Manage Actions access** list can authenticate with its
+runner-issued `secrets.GITHUB_TOKEN`:
 
 ```yaml
 - run: |
@@ -178,7 +175,10 @@ the same org by default:
       --password "${{ secrets.GITHUB_TOKEN }}"
 ```
 
-No additional PAT needed.
+No additional PAT is needed for those explicitly authorized private
+repositories. Do not grant the public source repository Actions access to the
+private package; public-repository fork workflows would broaden the package
+trust boundary.
 
 ---
 
@@ -186,88 +186,78 @@ No additional PAT needed.
 
 GitHub Packages NuGet authentication is required even when the source
 repository is public. Repository and package visibility are managed separately
-by GitHub and must be checked before each public release announcement.
+by GitHub and must be checked before each public release announcement. The
+package is intentionally kept private.
 
 - Consumers need a GitHub account and a classic PAT with `read:packages`.
-- If the package is not public, consumers also need package or repository read
-  access.
+- Because the package is private, consumers also need explicit package read
+  access, either directly or through an authorized private consuming
+  repository.
 - Making the source repository public does not change the release target:
   packages continue to publish only to GitHub Packages.
+- Public GitHub Releases contain no `.nupkg` or `.snupkg` assets, so the
+  Release page does not bypass private registry access.
+- Pull-request and `main` CI validate packed binaries without uploading them as
+  downloadable Actions artifacts.
 
 Any visibility change is an explicit administrator operation on the GitHub
 repository or package settings. This runbook does not authorize or automate it.
 Publishing to nuget.org is out of scope.
 
+### Maintainer credentials after source publication
+
+The public source repository must not inherit private package permissions and
+must not be added under the package's **Manage Actions access** list. This
+prevents package access from extending to workflows from public forks.
+
+After the source repository becomes public, maintainers configure:
+
+- `NUGET_PUBLISH_USERNAME` and `NUGET_PUBLISH_TOKEN` as secrets in the
+  protected `github-packages` environment. The username must be the PAT
+  owner's GitHub login. Use a dedicated classic PAT with `write:packages`; its
+  account must have **Write** or **Admin** access to this package. Restrict the
+  environment to release tags (`v*`) and require maintainer approval where the
+  repository plan supports it.
+- `NUGET_READ_USERNAME` and `NUGET_READ_TOKEN` as secrets in the separate
+  `github-packages-read` environment used by `consumer-smoke.yml`. The username
+  must be the PAT owner's login. Use a separate classic PAT with
+  `read:packages`; its account must have **Read** access to this package.
+  Set its deployment branch policy to `main`; add a required reviewer if
+  interactive approval is acceptable for the post-release smoke check.
+
+The publish and consumer workflows query the repository's live visibility and
+fail before package access if these values are absent in a public repository.
+They do not trust the visibility snapshot stored in an old workflow event. The
+`v1.0.0` bootstrap release may use the repository `GITHUB_TOKEN` only while the
+source repository is still private and package permission inheritance is still
+enabled. See
+[`ADR-0005`](./adr/0005-public-source-private-package-distribution.md).
+
 ---
 
 ## 7. Symbols
 
-The `.snupkg` is uploaded as a **GitHub Release asset only**. It is
-NOT pushed to GitHub Packages because GitHub Packages does not run a
-symbol server.
-
-For debug symbols today: download the `.snupkg` from the Release page
-and load it via Visual Studio's "Tools → Options → Debugging → Symbols"
-or `dotnet-symbol`.
-
-SourceLink-driven step-through into the repo source is a v0.2 follow-up.
+The `.snupkg` is built and validated in the release workflow, but it is not
+uploaded to the public GitHub Release and is not pushed to GitHub Packages.
+This keeps all package binaries within the private
+distribution boundary. Consumers who need symbols must build the matching tag
+from source.
 
 ---
 
-## 8. Attestation
+## 8. Provenance attestations
 
-Attestation is **opt-in via the repo variable `ENABLE_ATTESTATION`**.
+Artifact attestation is currently disabled. GitHub grants OIDC and attestation
+permissions at job scope, so placing an optional attestation step in the
+publish job would expose those permissions to restore, build, test, and package
+publication steps even when the feature was unused.
 
-- `ENABLE_ATTESTATION` unset OR not `'true'` (default): attestation
-  step is skipped. Publish proceeds. The other defense-in-depth
-  gates (ancestor check, registry byte-invariant, Release-asset
-  preflight, `release-checksums.txt`) still apply.
-- `ENABLE_ATTESTATION` set to the string `'true'` (Settings → Secrets
-  and variables → Actions → Variables): the step runs, produces a
-  GitHub-issued build provenance attestation (SLSA v1.0 Build
-  Level 2 by default with `actions/attest-build-provenance`), and
-  gates publish. A failed attestation aborts before any immutable
-  registry write (this ordering is in `release.yml` by design; do
-  not reorder). Reaching SLSA v1.0 Build Level 3 additionally
-  requires moving the build into a vetted reusable workflow; that
-  is out of scope for v0.1.
-
-### Why opt-in
-
-Artifact-attestation eligibility depends on repository visibility and the
-organization's GitHub plan. The release pipeline therefore requires a
-maintainer to confirm eligibility before enabling the gate. When attestation is
-disabled, the ancestor check, byte-equal registry duplicate check, byte-equal
-Release-asset preflight, and `release-checksums.txt` remain mandatory.
-
-### How to enable
-
-After confirming that the repository is eligible for GitHub Artifact
-Attestations:
-
-1. Go to: `https://github.com/KyuzanInc/turnkey-sdk-csharp/settings/variables/actions`
-2. Click "New repository variable".
-3. Name: `ENABLE_ATTESTATION`. Value: `true`.
-4. Save. The next Release publish will produce attestations.
-
-No workflow code change is required to enable or disable — the toggle
-is a single repo-variable.
-
-### How to verify (once enabled)
-
-```bash
-VERSION=0.1.0-alpha.1
-gh attestation verify \
-  --owner KyuzanInc \
-  "KyuzanInc.Turnkey.Sdk.${VERSION}.nupkg"
-```
-
-The attestation proves the artifact was built by the
-`KyuzanInc/turnkey-sdk-csharp` repo's `release.yml` workflow at the
-tag's commit SHA, on a GitHub Actions hosted runner. With the
-current workflow this satisfies SLSA v1.0 Build Level 2; reaching
-Build Level 3 would additionally require moving the publish job
-into a vetted reusable workflow.
+Reintroduce attestation only through an isolated job or vetted reusable
+workflow that can prove the attested bytes are exactly the bytes admitted by
+the registry duplicate check before the immutable publish. Until then, the tag
+ancestor check, full test suite, strict package-content validation, registry
+byte invariant, checksum preflight, and `release-checksums.txt` remain the
+mandatory provenance controls.
 
 ---
 
@@ -316,9 +306,20 @@ One-time admin task on the repo settings → Branches → `main`:
 - **Allow force pushes**: disabled.
 - **Allow deletions**: disabled.
 
-Repository visibility is not a required PR check and is not continuously
-changed or monitored by a workflow in this repository. Before a public release
-announcement, an administrator must verify the current setting explicitly:
+Repository and package visibility are not PR checks and are not continuously
+changed by a workflow in this repository. Before a public release announcement,
+an administrator must verify all of the following:
+
+- repository visibility is `public`;
+- package visibility is `private`;
+- package access inheritance is disabled in the package settings UI;
+- the public source repository is absent from **Manage Actions access**, while
+  explicitly authorized private downstream repositories retain **Read**;
+- no GitHub Release or active Actions artifact exposes `.nupkg` or `.snupkg`;
+- secret scanning, push protection, Dependabot alerts/security updates, and
+  private vulnerability reporting are enabled.
+
+The repository visibility check is:
 
 ```bash
 gh repo view KyuzanInc/turnkey-sdk-csharp \
@@ -326,5 +327,6 @@ gh repo view KyuzanInc/turnkey-sdk-csharp \
   --jq '.visibility'
 ```
 
-This is a read-only check. Visibility changes remain a separate administrator
-operation and are never implied by the release procedure.
+These checks are read-only except for the explicit administrator setup itself.
+Package inheritance has no supported REST endpoint and must be verified in the
+package settings UI.
