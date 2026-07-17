@@ -1,7 +1,7 @@
 {
   "_provenance": {
     "level": "upstream-test-vectors",
-    "source": "codex-crypto-reviews/upstream-snapshots/turnkey-encoding-0.6.0/ts-source/__tests__/index-test.ts",
+    "source": "tests/UpstreamSources/turnkey-encoding-0.6.0/ts-source/__tests__/index-test.ts",
     "package": "@turnkey/encoding@0.6.0",
     "tarball_sha256": "2cf9e6ee1f47ac7e3cc3e644cdb0e3e112c906a6ea1af737777f4658b73fb7bc",
     "note": "Bytes / strings reproduced verbatim from the upstream Jest test file. Reviewers can byte-compare each entry against the linked TS file."

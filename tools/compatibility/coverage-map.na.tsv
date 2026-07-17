@@ -1,0 +1,61 @@
+# coverage-map.na.tsv
+#
+# Curated TAB-separated list of upstream tests that the C# SDK deliberately
+# does NOT port. The companion script `coverage-map.sh` reads this file when
+# building `coverage-map.tsv` and accepts each row as an explicit N/A
+# mapping. The `--check` gate rejects an empty reason column.
+#
+# Format:
+#   <upstream_relpath>:<line><TAB><reason>
+#
+# Reason conventions:
+#   not-ported: <symbol>       — C# does not expose this upstream API.
+#   runtime-variant: <name>    — upstream tests multiple runtimes (nodecrypto /
+#                                WebCrypto / purejs / universal); C# ports
+#                                only the deterministic purejs path.
+#   e2e-only: live-backend     — upstream only exercises this under a live
+#                                Turnkey backend; C# defers to Tier-4 opt-in.
+#   proof-fixture-only         — covered indirectly by ProofFixtureProvenanceTests.
+
+# ---- proof verifier (proof-tests.ts) — all N/A, proof scope-out ----
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts:63	proof-fixture-only — proof verifier is outside the supported API; fixture structure and provenance are checked by ProofFixtureProvenanceTests
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts:68	proof-fixture-only — paired app/boot proof data is retained for provenance, not cryptographic verification
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts:77	proof-fixture-only — malformed app-proof verification requires the unported proof verifier
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts:101	proof-fixture-only — malformed boot-proof verification requires the unported proof verifier
+
+# ---- async polling (async-test.ts) — all N/A, withAsyncPolling unported ----
+tests/UpstreamSources/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:43	not-ported: withAsyncPolling — polling and activity lifecycle orchestration are outside the request-signing API
+tests/UpstreamSources/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:82	not-ported: withAsyncPolling — consensus-required polling errors belong to the unported full HTTP client
+tests/UpstreamSources/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:133	not-ported: withAsyncPolling — rejected-activity polling errors belong to the unported full HTTP client
+tests/UpstreamSources/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:191	not-ported: withAsyncPolling — failed-activity polling errors belong to the unported full HTTP client
+tests/UpstreamSources/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:235	not-ported: withAsyncPolling — synchronous activity polling is outside the request-signing API
+tests/UpstreamSources/turnkey-http-3.16.0/ts-source/__tests__/async-test.ts:274	not-ported: withAsyncPolling — typecheck-only test; not a runtime equivalence target
+
+# ---- crypto-test.ts: hpkeAuthEncrypt, extractPrivateKeyFromPKCS8Bytes, verifyRequestStamp ----
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:31	not-ported: hpkeAuthEncrypt — authenticated sender mode is outside the standard-mode HPKE API
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:187	not-ported: extractPrivateKeyFromPKCS8Bytes — PKCS#8 import is outside the supported bundle API
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:199	not-ported: verifyRequestStamp — the package constructs signed requests but does not expose a request-stamp verifier
+
+# ---- DER parser negative tests (crypto-test.ts:263-454) — fromDerSignature unported ----
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:263	not-ported: fromDerSignature — DER input parsing is outside the supported Crypto API; stamper output DER is checked by ApiKeyStamperTests.SignWithApiKey_ProducesDerHexThatVerifies
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:274	not-ported: fromDerSignature — same as above; this case covers 33-byte INTEGER with leading zero
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:287	not-ported: fromDerSignature — missing SEQUENCE tag (0x30)
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:304	not-ported: fromDerSignature — empty signature negative path
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:310	not-ported: fromDerSignature — too-short signature negative path
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:319	not-ported: fromDerSignature — unsupported length encoding (0x80-0xFE)
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:332	not-ported: fromDerSignature — short-form length boundary case
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:352	not-ported: fromDerSignature — invalid r length
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:369	not-ported: fromDerSignature — invalid s length
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:386	not-ported: fromDerSignature — invalid non-padding r bytes
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:403	not-ported: fromDerSignature — invalid non-padding s bytes
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:422	not-ported: fromDerSignature — invalid r INTEGER tag
+tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:439	not-ported: fromDerSignature — invalid s INTEGER tag
+
+# ---- signature-test.ts test.each runtime variants ----
+# The Turnkey fixture row is covered by the deterministic PureJS fixture. The
+# OpenSSL keypair row exercises nodecrypto / WebCrypto / universal runtimes that
+# this single-provider C# implementation does not expose.
+tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/signature-test.ts:52	runtime-variant: OpenSSL-keypair stamping under nodecrypto / WebCrypto / universal is not ported; the supported deterministic PureJS-equivalent path is covered by ApiKeyStamperTests
+
+# ---- request-test.ts: grpc rich error details ----
+tests/UpstreamSources/turnkey-http-3.16.0/ts-source/__tests__/request-test.ts:38	e2e-only: live-backend — gRPC status-detail decoding requires the unported full HTTP client and a real backend error response

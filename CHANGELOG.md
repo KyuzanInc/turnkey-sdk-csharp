@@ -7,44 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.2] — 2026-07-17
+
 ### Changed
 
-- README rewritten as a self-contained entry point for .NET developers:
-  - New `Quick start` section with six copy-paste examples (key pair,
-    signed request, stamping, credential / export bundle decrypt,
-    encoding helpers) plus a full end-to-end `query/whoami` flow.
-  - New `Installation` section documenting the GitHub Packages feed
-    via a **project-local** `nuget.config` (avoids polluting the
-    user-global config and is compatible with Central Package
-    Management consumers — sidesteps `NU1507`).
-  - New `Source mapping` table indexing every upstream Turnkey TS file
-    to its C# destination so readers see provenance without opening
-    `src/*.cs` headers.
-  - New `Intentionally unported` section listing every upstream surface
-    deliberately omitted (`hpkeAuthEncrypt`, `quorumKeyEncrypt`,
-    `proof.ts`, WebAuthn stamping, the full http client, etc.) so
-    consumers do not debug missing-feature confusion.
-  - New `Where to read next` navigation footer, pointing at the existing
-    `Verification posture` section (the authoritative 4-tier verification
-    write-up), the threat model, the Codex review trail, and the
-    dependency lockfile pins.
-  - `Status` rewritten to emphasise the audit trail and ongoing
-    trademark / distribution review instead of reading as a closed
-    door to external readers.
+- Replaced internal AI-review artifacts with public compatibility
+  documentation, ADRs, reproducible source-checksum verification, and a
+  machine-enforced upstream-test coverage map.
+- Relocated the minimal pinned TypeScript source and test inputs to
+  `tests/UpstreamSources/`; removed compiled npm distributions and raw review
+  transcripts.
+- Documented the supported API boundary and current verification gaps without
+  relying on private downstream repositories or unpublished review logs.
+- Added Apache-2.0 attribution and license material for retained and adapted
+  Turnkey source and fixtures.
+- Rewrote the README and contribution guidance for OSS consumers while keeping
+  GitHub Packages as the only package registry.
+- Hardened the compatibility coverage gate against non-test/skip false
+  positives and stale generated evidence, made source-package and drift issue
+  handling fail closed, and aligned CI package inspection with the strict
+  release checks.
 
 ## [0.1.0-alpha.0] — 2026-05-23
 
 ### Added
 
-- `Turnkey.Encoding` — 1:1 logical port of `@turnkey/encoding@0.6.0`
+- `Turnkey.Encoding` — logical compatibility port of `@turnkey/encoding@0.6.0`
   (hex / base58 / base58check / base64url / point compression).
-- `Turnkey.Crypto` — 1:1 logical port of the subset of
-  `@turnkey/crypto@2.8.8` consumed by the peak Unity SDK:
+- `Turnkey.Crypto` — logical compatibility port of the supported subset of
+  `@turnkey/crypto@2.8.8`:
   - P-256 key pair generation (`GenerateP256KeyPair`, `GetPublicKey`).
   - HPKE-Base mode encrypt / decrypt (`HpkeEncrypt`, `HpkeDecrypt`)
-    using P-256 / HKDF-SHA256 / AES-128-GCM, with the labelled
-    information construction copied byte-for-byte from upstream
-    `crypto.ts`.
+    using P-256 / HKDF-SHA256 / AES-128-GCM and the pinned upstream
+    `crypto.ts` labelled information construction.
   - Tonelli-Shanks modular square root (`Math.ModSqrt`) for point
     decompression.
   - RFC 5869 HKDF-HMAC-SHA256 (`Hkdf.Extract`, `Hkdf.Expand`) ported
@@ -61,11 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Session JWT signature verification
     (`VerifySessionJwtSignature`, with
     `dangerouslyOverrideNotarizerPublicKey`).
-- `Turnkey.ApiKeyStamper` — 1:1 logical port of
-  `@turnkey/api-key-stamper@0.5.0` mirroring the upstream "purejs"
-  runtime (RFC 6979 deterministic ECDSA + low-S, DER hex output).
-- `Turnkey.Http` — 1:1 logical port of the request-signing subset of
-  `@turnkey/http@3.16.0` consumed by the peak Unity SDK:
+- `Turnkey.ApiKeyStamper` — logical port of
+  `@turnkey/api-key-stamper@0.5.0` using deterministic RFC 6979 ECDSA,
+  explicit low-S normalization, and DER hex output.
+- `Turnkey.Http` — logical compatibility port of the request-signing subset of
+  `@turnkey/http@3.16.0`:
   - `query/whoami`
   - `submit/init_import_private_key`
   - `submit/import_private_key`
@@ -85,12 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | `@turnkey/api-key-stamper`    | 0.5.0   | `962a2d22c7c40240f05be98533769b37ab7dad7dbb5abec762c41007233d02bd`   |
 | `@turnkey/encoding`           | 0.6.0   | `2cf9e6ee1f47ac7e3cc3e644cdb0e3e112c906a6ea1af737777f4658b73fb7bc`   |
 
-### Reviewed by
+### Verification at the initial alpha release
 
-- Per-file Codex multi-round review (≥3 rounds each, evidence in
-  [`codex-crypto-reviews/`](./codex-crypto-reviews/)).
-- Integrated cross-file review with **GO** verdict
-  (`codex-crypto-reviews/FINAL-INTEGRATED-REVIEW-20260523.md`).
 - 113 xunit tests covering hex / base58 / base64url / HKDF RFC 5869
   / NIST P-256 / Curve.Secp256k1 / HPKE round-trip / API key signing
   / DER signature verification / public API surface snapshot.
@@ -100,7 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- Pre-release, internal-only. Not published to nuget.org.
+- Pre-release. Published to GitHub Packages only, not nuget.org.
 - Default base URL is `https://api.turnkey.com`; each
   `Http.GetHttpClient` / `Http.FromTargetPrivateKey` factory accepts an
   optional `baseUrl` argument.

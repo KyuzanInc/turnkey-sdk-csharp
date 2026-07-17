@@ -1,16 +1,15 @@
-// 1:1 logical port of the subset of @turnkey/http@3.16.0 used by the
-// peak Unity SDK to construct signed activity requests.
+// Logical compatibility port of the supported request-signing subset of
+// @turnkey/http@3.16.0.
 //
 // Upstream snapshot:
-//   codex-crypto-reviews/upstream-snapshots/turnkey-http-3.16.0/
+//   tests/UpstreamSources/turnkey-http-3.16.0/
 //
 // Scope:
 //   The upstream package is a full client (auto-generated activity
-//   methods, polling, error handling, WebAuthn). The peak Unity port
-//   only takes the **request-signing** subset: build a request body,
+//   methods, polling, error handling, WebAuthn). This library exposes the
+//   **request-signing** subset: build a request body,
 //   stamp it with an ApiKeyStamper, return a { url, body, stamp }
-//   bundle for the caller to send over HTTPS. This C# port preserves
-//   that same subset surface verbatim (D16 simplicity directive).
+//   bundle for the caller to send over HTTPS.
 //
 // Activities covered (Turnkey API endpoints):
 //   query/whoami
@@ -33,9 +32,9 @@
 //   Upstream's `stampX(input)` calls JSON.stringify(input) which preserves
 //   the caller's object key insertion order — NOT the order declared in
 //   public_api.types.ts. Field declaration order in the C# DTOs therefore
-//   determines the emitted JSON byte order. The order chosen here mirrors
-//   the peak Unity port. Wire format works because the same bytes are
-//   both signed (by ApiKeyStamper.Stamp) and sent (as body), so the
+//   determines the emitted JSON byte order. The declared order is part of the
+//   compatibility contract. The same bytes are both signed (by
+//   ApiKeyStamper.Stamp) and returned as the body, so the
 //   signature always verifies against the exact body delivered.
 
 using System;
@@ -45,8 +44,8 @@ namespace Turnkey
 {
     /// <summary>
     /// Builds signed Turnkey API requests using an
-    /// <see cref="ApiKeyStamper"/>. 1:1 logical port of the subset of
-    /// <c>@turnkey/http</c> 3.16.0 needed by peak's Unity flow.
+    /// <see cref="ApiKeyStamper"/>. Logical compatibility port of the
+    /// supported subset of <c>@turnkey/http</c> 3.16.0.
     /// </summary>
     public class Http
     {

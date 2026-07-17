@@ -9,9 +9,9 @@
     <Version>0.1.0-alpha.0</Version>
     <Authors>Kyuzan Inc.</Authors>
     <Company>Kyuzan Inc.</Company>
-    <Description>Unofficial / community-maintained Turnkey SDK for .NET by Kyuzan Inc. Not affiliated with Turnkey, Inc. 1:1 logical port of @turnkey/crypto v2.8.8, @turnkey/http v3.16.0, @turnkey/api-key-stamper v0.5.0, and @turnkey/encoding v0.6.0 (peak-pinned versions). Provides P-256 ECDSA / HPKE / HKDF / API key stamping primitives for .NET. BouncyCastle 2.5.0 is used only for primitives; HPKE / HKDF / bundle parsing are direct ports of the upstream Turnkey TypeScript logic.</Description>
+    <Description>Unofficial, community-maintained Turnkey SDK for .NET by Kyuzan Inc. Not affiliated with Turnkey, Inc. A logical compatibility port of explicitly pinned @turnkey/crypto, @turnkey/http, @turnkey/api-key-stamper, and @turnkey/encoding versions. Provides P-256 ECDSA, HPKE, HKDF, and API-key stamping primitives for .NET.</Description>
     <PackageProjectUrl>https://github.com/KyuzanInc/turnkey-sdk-csharp</PackageProjectUrl>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageLicenseExpression>MIT AND Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/KyuzanInc/turnkey-sdk-csharp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -28,5 +28,6 @@
     <None Include="..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\LICENSE"   Pack="true" PackagePath="\" />
     <None Include="..\NOTICE"    Pack="true" PackagePath="\" />
+    <None Include="..\LICENSES\Apache-2.0.txt" Pack="true" PackagePath="LICENSES\" />
   </ItemGroup>
 </Project>

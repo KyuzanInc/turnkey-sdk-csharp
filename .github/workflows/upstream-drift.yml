@@ -1,12 +1,9 @@
 # Upstream-drift detection (idempotent).
 #
-# Once a month, hash each pinned upstream __tests__/*.ts and
-# __fixtures__/* file at the pinned git tag SHA via the GitHub
+# Once a month, hash each retained upstream source file at the pinned
+# Git commit via the GitHub
 # Contents API, then compare to the local pin in
-# codex-crypto-reviews/upstream-snapshots/test-file-checksums.txt.
-#
-# Per plan Section 6.4 and Section 9 risk row "公式テストファイル
-# sha256 を pin したのに毎月差分が出て CI が騒がしい":
+# tests/UpstreamSources/source-file-checksums.txt.
 #
 #   - This workflow is NOT a main-branch CI gate. It can never block
 #     a PR. Drift surfaces only as a GitHub issue.
@@ -60,14 +57,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Verify retained source manifest
+        run: ./tools/compatibility/verify-source-checksums.sh
+
       # The pin file format is "<sha256>  <relpath>" where <relpath>
-      # always starts with "codex-crypto-reviews/upstream-snapshots/".
+      # always starts with "tests/UpstreamSources/".
       # We need to convert that to the GitHub Contents API path which
       # is "<tarball_dir>/src/__tests__/<file>" — the live upstream
       # GitHub tree does not have a "ts-source" prefix.
       #
       # Concretely the local path looks like:
-      #   codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts
+      #   tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts
       # and the upstream path is:
       #   packages/crypto/src/__tests__/crypto-test.ts
       #
@@ -86,8 +86,10 @@ jobs:
 
           REPORT=$(mktemp)
           : > "$REPORT"
+          API_RESPONSE=$(mktemp)
 
           drift_count=0
+          matched_count=0
 
           while IFS= read -r line; do
             # Skip comments and blank lines.
@@ -100,25 +102,47 @@ jobs:
 
             # Filter to this matrix package only.
             case "$relpath" in
-              "codex-crypto-reviews/upstream-snapshots/${PACKAGE}/"*) ;;
+              "tests/UpstreamSources/${PACKAGE}/"*) ;;
               *) continue ;;
             esac
+            matched_count=$((matched_count + 1))
 
             # Strip the local prefix to derive the in-tarball relative path,
             # then rewrite "ts-source" -> "src" for the live upstream layout.
-            local_subpath="${relpath#codex-crypto-reviews/upstream-snapshots/${PACKAGE}/}"
+            local_subpath="${relpath#tests/UpstreamSources/${PACKAGE}/}"
             upstream_subpath=${local_subpath/ts-source\//src/}
 
             # Read the live file via the Contents API at the pinned SHA.
-            api_path="repos/${OWNER}/${REPO}/contents/${TARBALL_DIR}/${upstream_subpath}?ref=${GIT_SHA}"
-            live_b64=$(gh api -H "Accept: application/vnd.github+json" "$api_path" --jq '.content // ""')
-            if [[ -z "$live_b64" ]]; then
+            # Distinguish a genuine 404 (drift) from authentication, rate-limit,
+            # transport, and server failures (workflow failure).
+            api_url="https://api.github.com/repos/${OWNER}/${REPO}/contents/${TARBALL_DIR}/${upstream_subpath}"
+            http_status=$(curl --silent --show-error --location \
+              --output "$API_RESPONSE" \
+              --write-out '%{http_code}' \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --get \
+              --data-urlencode "ref=${GIT_SHA}" \
+              "$api_url")
+
+            if [[ "$http_status" == "404" ]]; then
               {
                 echo "- **MISSING_UPSTREAM**: \`${upstream_subpath}\` (not found at ${OWNER}/${REPO}@${GIT_SHA})";
               } >> "$REPORT"
               drift_count=$((drift_count + 1))
               continue
             fi
+            if [[ "$http_status" != "200" ]]; then
+              echo "::error::GitHub Contents API returned HTTP ${http_status} for ${OWNER}/${REPO}@${GIT_SHA}:${upstream_subpath}" >&2
+              exit 1
+            fi
+            if ! jq -e '.encoding == "base64" and (.content | type == "string")' \
+              "$API_RESPONSE" >/dev/null; then
+              echo "::error::GitHub Contents API returned an unexpected payload for ${OWNER}/${REPO}@${GIT_SHA}:${upstream_subpath}" >&2
+              exit 1
+            fi
+            live_b64=$(jq -r '.content' "$API_RESPONSE")
 
             # Contents API base64-decodes with embedded newlines.
             live_sha=$(printf '%s' "$live_b64" | tr -d '\n' | base64 -d | shasum -a 256 | awk '{print $1}')
@@ -132,14 +156,21 @@ jobs:
               } >> "$REPORT"
               drift_count=$((drift_count + 1))
             fi
-          done < codex-crypto-reviews/upstream-snapshots/test-file-checksums.txt
+          done < tests/UpstreamSources/source-file-checksums.txt
+
+          rm -f "$API_RESPONSE"
+
+          if [[ "$matched_count" -eq 0 ]]; then
+            echo "::error::checksum manifest has no retained source rows for ${PACKAGE}; refusing to update issues" >&2
+            exit 1
+          fi
 
           {
             echo "DRIFT_COUNT=$drift_count"
             echo "REPORT_PATH=$REPORT"
           } >> "$GITHUB_OUTPUT"
 
-      # Idempotent issue handling (plan Section 6.4):
+      # Idempotent issue handling:
       #   - Search for an open issue labelled `upstream-drift` whose
       #     title contains the package name.
       #   - If found: edit the body to the latest report and add a
@@ -148,7 +179,7 @@ jobs:
       #   - If drift_count is 0 and an open issue exists: close it
       #     with a "resolved" comment.
       - name: Upsert drift issue
-        if: always()
+        if: ${{ steps.drift.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRIFT_LABEL: upstream-drift
@@ -158,8 +189,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [[ ! "$DRIFT_COUNT" =~ ^[0-9]+$ ]]; then
+            echo "::error::invalid or missing DRIFT_COUNT; refusing to update issues" >&2
+            exit 1
+          fi
+          if [[ -z "$REPORT_PATH" || ! -f "$REPORT_PATH" ]]; then
+            echo "::error::missing drift report; refusing to update issues" >&2
+            exit 1
+          fi
+
           gh label create "$DRIFT_LABEL" --color "d73a4a" \
-            --description "Upstream test-file sha256 drift detected" 2>/dev/null || true
+            --description "Pinned upstream source sha256 drift detected" 2>/dev/null || true
 
           # Build the body up-front so the rest of the logic is single-shot.
           if [[ "$DRIFT_COUNT" -gt 0 ]]; then
@@ -173,7 +213,7 @@ jobs:
               echo ""
               echo "## Re-pin procedure"
               echo ""
-              echo "See \`codex-crypto-reviews/turnkey-source-pins.md\` (\"Re-pinning procedure\")."
+              echo "See \`docs/compatibility/upstream-pins.md\` (\"Re-pinning procedure\")."
             } > "$BODY_FILE"
           fi
 

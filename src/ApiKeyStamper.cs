@@ -1,7 +1,7 @@
-// 1:1 logical port of @turnkey/api-key-stamper@0.5.0
+// Logical compatibility port of @turnkey/api-key-stamper@0.5.0
 //
 // Upstream snapshot:
-//   codex-crypto-reviews/upstream-snapshots/turnkey-api-key-stamper-0.5.0/
+//   tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/
 //
 // Files covered:
 //   ts-source/index.ts                -> ApiKeyStamper class + signWithApiKey
@@ -18,14 +18,16 @@
 //   identical to what upstream produces when `runtimeOverride = "purejs"`
 //   is passed.
 //
-// Wire bytes:
-//   - signature.toDERHex() output equals upstream's noble signature.toDERHex().
+// Wire behavior:
+//   - DER encoding matches the format consumed by the Turnkey API.
 //   - The stamp JSON shape is exactly the upstream's
 //     { publicKey, scheme, signature } in this order.
 //   - The X-Stamp header value is base64url(JSON), matching upstream's
 //     `stringToBase64urlString(JSON.stringify(stamp))`.
-//   - SHA-256(content) and deterministic ECDSA (RFC 6979) are used; low-S is
-//     enforced (noble defaults to lowS: true).
+//   - SHA-256(content) and deterministic ECDSA (RFC 6979) are used.
+//   - C# explicitly normalizes to low-S. The pinned upstream PureJS fixture
+//     emits the equivalent high-S form for the retained vector, so signature
+//     byte identity is not claimed; r and s ↔ (n - s) are verified in tests.
 
 using System;
 using System.IO;
@@ -38,12 +40,13 @@ using Org.BouncyCastle.Security;
 namespace Turnkey
 {
     /// <summary>
-    /// Stamper for Turnkey API requests. 1:1 logical port of upstream
-    /// <c>@turnkey/api-key-stamper</c> at peak's pinned version 0.5.0.
+    /// Stamper for Turnkey API requests. Logical compatibility port of
+    /// <c>@turnkey/api-key-stamper</c> version 0.5.0.
     /// </summary>
     /// <remarks>
     /// <para><b>Runtime parity target:</b> this port mirrors upstream's
-    /// <c>purejs</c> runtime (deterministic ECDSA via RFC 6979 + low-S).
+    /// <c>purejs</c> runtime (deterministic ECDSA via RFC 6979), with an
+    /// intentional canonical low-S normalization in this implementation.
     /// Upstream's default <c>detectRuntime()</c> picks <c>"node"</c> in
     /// Node which dispatches to <c>nodecrypto.ts</c> and produces
     /// non-deterministic signatures (random k); behavior parity with
@@ -147,8 +150,8 @@ namespace Turnkey
         /// Mirror of upstream <c>purejs.ts signWithApiKey</c>. Verifies that
         /// the configured public key matches the one derived from the
         /// configured private key, then SHA-256-hashes the payload and signs
-        /// it with deterministic ECDSA (RFC 6979 + low-S) returning the
-        /// DER-encoded signature as a hex string.
+        /// it with deterministic ECDSA (RFC 6979), normalizes the signature
+        /// to low-S, and returns DER-encoded hexadecimal.
         /// </summary>
         public string SignWithApiKey(string content)
         {
@@ -174,7 +177,7 @@ namespace Turnkey
 
             // Upstream:
             //   const hash = createHash().update(input.content).digest();   // SHA-256
-            //   const signature = p256.sign(hash, input.privateKey);        // RFC 6979 + lowS
+            //   const signature = p256.sign(hash, input.privateKey);        // RFC 6979
             //   return signature.toDERHex();
             var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
             var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
@@ -196,14 +199,11 @@ namespace Turnkey
             BigInteger r = signature[0];
             BigInteger s = signature[1];
 
-            // Low-S normalization. @turnkey/api-key-stamper@0.5.0 depends on
-            // @noble/curves@^1.3.0, and noble v1.3.0
-            // (src/abstract/weierstrass.ts) defaults to lowS=true:
-            //   let { lowS, prehash, extraEntropy: ent } = opts;
-            //   if (lowS == null) lowS = true; // RFC6979 3.2
-            // The upstream purejs.ts call `p256.sign(hash, privateKey)` passes
-            // no opts, so the runtime emits low-S signatures. We reproduce
-            // that here by clamping s into (0, n/2].
+            // Intentional low-S normalization. The pinned upstream PureJS
+            // fixture emits the mathematically equivalent high-S form for the
+            // retained vector. The C# contract selects the canonical form
+            // s <= n/2; compatibility tests assert identical r and
+            // s_csharp = n - s_upstream when the upstream value is high-S.
             BigInteger halfN = domainParams.N.ShiftRight(1);
             if (s.CompareTo(halfN) > 0)
             {
@@ -216,7 +216,8 @@ namespace Turnkey
         /// <summary>
         /// Encode the <c>(r, s)</c> pair as a DER ASN.1 SEQUENCE of two
         /// INTEGERs, then hex-encode the result.
-        /// Equivalent to noble's <c>signature.toDERHex()</c>.
+        /// Uses the same DER SEQUENCE-of-INTEGERs representation as noble's
+        /// <c>signature.toDERHex()</c>.
         /// </summary>
         private static string EncodeDerSignatureHex(BigInteger r, BigInteger s)
         {

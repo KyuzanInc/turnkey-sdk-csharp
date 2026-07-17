@@ -1,7 +1,7 @@
-// 1:1 logical port of @turnkey/encoding@0.6.0
+// Logical compatibility port of @turnkey/encoding@0.6.0
 //
 // Upstream snapshot:
-//   codex-crypto-reviews/upstream-snapshots/turnkey-encoding-0.6.0/
+//   tests/UpstreamSources/turnkey-encoding-0.6.0/
 //
 // Files covered:
 //   ts-source/hex.ts          -> Uint8ArrayToHexString / Uint8ArrayFromHexString /
@@ -29,8 +29,7 @@
 //                           (same algorithm; produces the same bytes for valid
 //                            input as the bs58 npm package)
 //
-// Unity-specific helpers kept for Crypto.cs consumption (also present in the
-// peak Unity port):
+// Library-local helpers kept for Crypto.cs consumption:
 //   Uint8ArrayToString -> UTF-8 decode helper (TS uses TextDecoder; in this
 //                         repo it is a thin wrapper over System.Text.Encoding.UTF8)
 //   ConcatUint8Arrays  -> array concatenation helper (TS spreads `...` in
@@ -47,7 +46,7 @@ namespace Turnkey
 {
     /// <summary>
     /// Encoding utilities for the Turnkey API.
-    /// 1:1 logical port of <c>@turnkey/encoding</c> v0.6.0.
+    /// Logical compatibility port of <c>@turnkey/encoding</c> v0.6.0.
     /// </summary>
     public static class Encoding
     {

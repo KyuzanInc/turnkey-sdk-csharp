@@ -1,7 +1,7 @@
 {
   "_provenance": {
     "level": "upstream-test-vectors",
-    "upstream_file": "codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts",
+    "upstream_file": "tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts",
     "upstream_file_sha256": "2a9eb612b48c4f117954a88a691335addc6a516bba0f5d2b61cebe9735073dea",
     "upstream_package": "@turnkey/crypto",
     "upstream_package_version": "2.8.8",

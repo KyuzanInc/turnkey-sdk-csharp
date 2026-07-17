@@ -71,10 +71,9 @@ jobs:
           # Use the REST compare API instead of `git fetch origin main`.
           # Reason: `actions/checkout` ran with `persist-credentials:
           # false` (security), so the runner's `.git/config` has no
-          # credential to authenticate a `git fetch` against this
-          # private repo. `gh api` reads `GH_TOKEN` from the env and
-          # works against private repos without persisting a git
-          # credential.
+          # credential for `git fetch`. `gh api` reads `GH_TOKEN` from
+          # the environment and works without persisting a git
+          # credential, regardless of repository visibility.
           #
           # Semantics: GET /repos/{repo}/compare/{base}...{head} returns
           # `status` ∈ {ahead, behind, identical, diverged}, where
@@ -117,9 +116,6 @@ jobs:
             /p:SymbolPackageFormat=snupkg
 
       - name: Test
-        env:
-          TURNKEY_TEST_ORG_API_KEY: ${{ secrets.TURNKEY_TEST_ORG_API_KEY }}
-          TURNKEY_TEST_ORG_ID:      ${{ secrets.TURNKEY_TEST_ORG_ID }}
         run: dotnet test turnkey-sdk-csharp.sln -c Release --no-build
 
       - name: Pack
@@ -149,7 +145,7 @@ jobs:
           # .nupkg: strict path enumeration + full-line fixed-string match.
           nupkg_paths=$(unzip -Z1 "$NUPKG")
           echo "$nupkg_paths"
-          for f in README.md LICENSE NOTICE \
+          for f in README.md LICENSE NOTICE LICENSES/Apache-2.0.txt \
                    lib/netstandard2.1/KyuzanInc.Turnkey.Sdk.dll \
                    lib/net8.0/KyuzanInc.Turnkey.Sdk.dll; do
             echo "$nupkg_paths" | grep -Fxq "$f" \
@@ -321,20 +317,11 @@ jobs:
       # the step runs and a failure here aborts publish (the
       # immutable-write guard is preserved).
       #
-      # Rationale: GitHub Artifact Attestations are only available
-      # for PRIVATE / internal repos on GitHub Enterprise Cloud.
-      # Free / Pro / Team plans get attestations for PUBLIC repos
-      # only. KyuzanInc is not on Enterprise Cloud, so this private
-      # repo cannot use attestations on the current plan. Until the
-      # repo is moved to Enterprise Cloud OR made public, the
-      # variable stays unset and publish proceeds without GitHub
-      # build provenance. The other defense-in-depth gates (registry
-      # byte-invariant, Release-asset preflight, ancestor check,
-      # release-checksums.txt) cover the internal-consumption threat
-      # model. Build provenance (SLSA v1.0 Build Level 2 by default
-      # with `actions/attest-build-provenance`) is most valuable for
-      # EXTERNAL consumers of a PUBLIC package — exactly when the
-      # variable SHOULD be flipped on. See docs/release-process.md §8.
+      # Availability depends on the repository visibility and GitHub
+      # plan. Maintainers enable the variable only after confirming
+      # that the repository is eligible. The other defense-in-depth
+      # gates remain active when attestation is disabled. See
+      # docs/release-process.md §8.
       - name: Attest build provenance (nupkg + snupkg)
         if: vars.ENABLE_ATTESTATION == 'true'
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32

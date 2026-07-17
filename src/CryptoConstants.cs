@@ -4,7 +4,7 @@
 // where the upstream uses @noble/curves which hides them.
 //
 // Upstream snapshot:
-//   codex-crypto-reviews/upstream-snapshots/turnkey-crypto-2.8.8/
+//   tests/UpstreamSources/turnkey-crypto-2.8.8/
 //
 // Mapping to upstream:
 //   - CURVE_NAME: not present upstream; @noble/curves uses p256 implicitly.
@@ -16,7 +16,7 @@
 //       b = BigInt("0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b")
 //       a = p - BigInt(3)
 //     Pulled out into named constants here so the BouncyCastle wiring stays
-//     readable and so a Codex reviewer can confirm the bytes match.
+//     readable and the values can be checked against the pinned source.
 //
 // These constants are wire-irrelevant by themselves; what matters is that
 // the BouncyCastle code paths that consume them produce the same bytes as
