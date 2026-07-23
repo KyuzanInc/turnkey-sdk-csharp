@@ -31,6 +31,7 @@
 
 using System;
 using System.IO;
+using System.Security.Cryptography;
 using Org.BouncyCastle.Asn1.X9;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Signers;
@@ -127,11 +128,20 @@ namespace Turnkey
         {
             if (payload == null) throw new ArgumentNullException(nameof(payload));
 
-            string signatureDerHex = SignWithApiKey(payload);
+            string signatureDerHex = SignWithApiKey(payload, out string canonicalPublicKey);
 
             var stamp = new TurnkeyStamp
             {
-                PublicKey = _apiPublicKey,
+                // The CANONICAL lower-case public key derived from the private
+                // key, not the caller's spelling of _apiPublicKey. Since the
+                // comparison below accepts either hex spelling, an upper-case
+                // configuration would otherwise put an unusual spelling on the
+                // wire; Turnkey issues these keys in canonical lower-case hex,
+                // so the derived form is the one the backend is known to expect.
+                // For any lower-case configuration this is byte-identical to
+                // _apiPublicKey, because validation has already proved the two
+                // decode to the same bytes.
+                PublicKey = canonicalPublicKey,
                 Scheme = SignatureScheme,
                 Signature = signatureDerHex,
             };
@@ -155,62 +165,128 @@ namespace Turnkey
         /// </summary>
         public string SignWithApiKey(string content)
         {
+            return SignWithApiKey(content, out _);
+        }
+
+        /// <summary>
+        /// Core of <see cref="SignWithApiKey(string)"/>, additionally handing
+        /// back the canonical lower-case hex of the public key derived from the
+        /// configured private key so <see cref="Stamp(string)"/> can embed that
+        /// rather than the caller's spelling. Kept as one method so the key is
+        /// derived — and the decoded private key zeroed — exactly once per call.
+        /// </summary>
+        private string SignWithApiKey(string content, out string canonicalPublicKey)
+        {
             if (content == null) throw new ArgumentNullException(nameof(content));
 
-            // Upstream `purejs.ts`:
-            //   const publicKey = p256.getPublicKey(input.privateKey, true);
-            //   const publicKeyString = uint8ArrayToHexString(publicKey);
-            //   if (publicKeyString != input.publicKey) throw new Error(...);
+            // Decoded ONCE per call and zeroed in the finally below. The
+            // previous shape decoded _apiPrivateKey twice (once inside the
+            // Crypto.GetPublicKey(string) overload, once again for the signing
+            // scalar) and left both buffers for the GC, so an Http instance —
+            // which holds its stamper for its whole lifetime — accumulated two
+            // uncleared byte[32] copies of the API private key per signed
+            // request.
             //
-            // Crypto.GetPublicKey enforces the noble invariants (exact 32-byte
-            // private key, scalar in [1, n - 1]) before deriving the public
-            // key. Per the upstream pattern this validation happens at sign
-            // time, not at constructor time.
-            byte[] derivedPublicKeyBytes = Crypto.GetPublicKey(_apiPrivateKey, isCompressed: true);
-            string derivedPublicKey = Encoding.Uint8ArrayToHexString(derivedPublicKeyBytes);
-            if (!string.Equals(derivedPublicKey, _apiPublicKey, StringComparison.Ordinal))
+            // Ordering note: the hex decode has to stay ahead of the public-key
+            // validation because the GetPublicKey(string) overload it replaces
+            // decoded first too. Invalid hex therefore still surfaces as
+            // ArgumentException from Uint8ArrayFromHexString, and a
+            // well-formed-but-out-of-range scalar still surfaces from
+            // GetPublicKey, in exactly the original order.
+            byte[] privateKeyBytes = Encoding.Uint8ArrayFromHexString(_apiPrivateKey);
+            try
             {
-                throw new InvalidOperationException(
-                    "Bad API key. Expected to get public key " + _apiPublicKey
-                    + ", got " + derivedPublicKey);
+                // Upstream `purejs.ts`:
+                //   const publicKey = p256.getPublicKey(input.privateKey, true);
+                //   const publicKeyString = uint8ArrayToHexString(publicKey);
+                //   if (publicKeyString != input.publicKey) throw new Error(...);
+                //
+                // Crypto.GetPublicKey enforces the noble invariants (exact
+                // 32-byte private key, scalar in [1, n - 1]) before deriving the
+                // public key. Per the upstream pattern this validation happens
+                // at sign time, not at constructor time.
+                byte[] derivedPublicKeyBytes = Crypto.GetPublicKey(privateKeyBytes, isCompressed: true);
+                string derivedPublicKey = Encoding.Uint8ArrayToHexString(derivedPublicKeyBytes);
+                if (!ConfiguredPublicKeyMatches(derivedPublicKeyBytes))
+                {
+                    throw new InvalidOperationException(
+                        "Bad API key. Expected to get public key " + _apiPublicKey
+                        + ", got " + derivedPublicKey);
+                }
+
+                canonicalPublicKey = derivedPublicKey;
+
+                // Upstream:
+                //   const hash = createHash().update(input.content).digest();   // SHA-256
+                //   const signature = p256.sign(hash, input.privateKey);        // RFC 6979
+                //   return signature.toDERHex();
+                var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
+                var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
+                var privateKeyScalar = new BigInteger(1, privateKeyBytes);
+
+                byte[] payloadBytes = System.Text.Encoding.UTF8.GetBytes(content);
+
+                var digest = DigestUtilities.GetDigest("SHA-256");
+                digest.BlockUpdate(payloadBytes, 0, payloadBytes.Length);
+                var hash = new byte[digest.GetDigestSize()];
+                digest.DoFinal(hash, 0);
+
+                var hmacCalculator = new HMacDsaKCalculator(DigestUtilities.GetDigest("SHA-256"));
+                var signer = new ECDsaSigner(hmacCalculator);
+                signer.Init(true, new ECPrivateKeyParameters(privateKeyScalar, domainParams));
+
+                BigInteger[] signature = signer.GenerateSignature(hash);
+                BigInteger r = signature[0];
+                BigInteger s = signature[1];
+
+                // Intentional low-S normalization. The pinned upstream PureJS
+                // fixture emits the mathematically equivalent high-S form for the
+                // retained vector. The C# contract selects the canonical form
+                // s <= n/2; compatibility tests assert identical r and
+                // s_csharp = n - s_upstream when the upstream value is high-S.
+                BigInteger halfN = domainParams.N.ShiftRight(1);
+                if (s.CompareTo(halfN) > 0)
+                {
+                    s = domainParams.N.Subtract(s);
+                }
+
+                return EncodeDerSignatureHex(r, s);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(privateKeyBytes);
+            }
+        }
+
+        /// <summary>
+        /// Compares the public key derived from the configured private key
+        /// against the configured public key, by decoded BYTES rather than by
+        /// hex spelling.
+        /// </summary>
+        /// <remarks>
+        /// An ordinal string comparison rejected a perfectly valid keypair whose
+        /// configured public key happened to be spelled in upper-case hex, and
+        /// the resulting "expected X, got Y" message showed two values that look
+        /// identical to a reader. Comparing bytes accepts either spelling.
+        /// <para>A configured key that is null, empty or not valid hex cannot be
+        /// decoded and is reported as a mismatch — the same
+        /// <see cref="InvalidOperationException"/> the ordinal comparison used to
+        /// produce, rather than an <see cref="ArgumentException"/> escaping from
+        /// the hex decoder.</para>
+        /// </remarks>
+        private bool ConfiguredPublicKeyMatches(byte[] derivedPublicKeyBytes)
+        {
+            byte[] configuredPublicKeyBytes;
+            try
+            {
+                configuredPublicKeyBytes = Encoding.Uint8ArrayFromHexString(_apiPublicKey);
+            }
+            catch (ArgumentException)
+            {
+                return false;
             }
 
-            // Upstream:
-            //   const hash = createHash().update(input.content).digest();   // SHA-256
-            //   const signature = p256.sign(hash, input.privateKey);        // RFC 6979
-            //   return signature.toDERHex();
-            var curve = ECNamedCurveTable.GetByName(CryptoConstants.CURVE_NAME);
-            var domainParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
-            var privateKeyBytes = Encoding.Uint8ArrayFromHexString(_apiPrivateKey);
-            var privateKeyScalar = new BigInteger(1, privateKeyBytes);
-
-            byte[] payloadBytes = System.Text.Encoding.UTF8.GetBytes(content);
-
-            var digest = DigestUtilities.GetDigest("SHA-256");
-            digest.BlockUpdate(payloadBytes, 0, payloadBytes.Length);
-            var hash = new byte[digest.GetDigestSize()];
-            digest.DoFinal(hash, 0);
-
-            var hmacCalculator = new HMacDsaKCalculator(DigestUtilities.GetDigest("SHA-256"));
-            var signer = new ECDsaSigner(hmacCalculator);
-            signer.Init(true, new ECPrivateKeyParameters(privateKeyScalar, domainParams));
-
-            BigInteger[] signature = signer.GenerateSignature(hash);
-            BigInteger r = signature[0];
-            BigInteger s = signature[1];
-
-            // Intentional low-S normalization. The pinned upstream PureJS
-            // fixture emits the mathematically equivalent high-S form for the
-            // retained vector. The C# contract selects the canonical form
-            // s <= n/2; compatibility tests assert identical r and
-            // s_csharp = n - s_upstream when the upstream value is high-S.
-            BigInteger halfN = domainParams.N.ShiftRight(1);
-            if (s.CompareTo(halfN) > 0)
-            {
-                s = domainParams.N.Subtract(s);
-            }
-
-            return EncodeDerSignatureHex(r, s);
+            return derivedPublicKeyBytes.AsSpan().SequenceEqual(configuredPublicKeyBytes.AsSpan());
         }
 
         /// <summary>

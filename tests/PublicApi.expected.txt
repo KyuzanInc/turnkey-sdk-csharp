@@ -63,6 +63,10 @@ namespace Turnkey
         public class DecryptExportBundleParams
         {
             public DecryptExportBundleParams() { }
+            [System.Obsolete("Test-only trust-anchor override. Setting this disables enclave signature verifica" +
+                "tion against the pinned production signer key. Never set it from configuration, " +
+                "deserialized JSON, or any other untrusted input.", false)]
+            [System.Text.Json.Serialization.JsonIgnore]
             public string? DangerouslyOverrideSignerPublicKey { get; set; }
             public string? EmbeddedKey { get; set; }
             public string? ExportBundle { get; set; }
@@ -70,9 +74,17 @@ namespace Turnkey
             public string? OrganizationId { get; set; }
             public bool ReturnMnemonic { get; set; }
         }
+        public static class Diagnostics
+        {
+            public static System.Action<string>? OnWarning { get; set; }
+        }
         public class EncryptPrivateKeyToBundleParams
         {
             public EncryptPrivateKeyToBundleParams() { }
+            [System.Obsolete("Test-only trust-anchor override. Setting this disables enclave signature verifica" +
+                "tion against the pinned production signer key. Never set it from configuration, " +
+                "deserialized JSON, or any other untrusted input.", false)]
+            [System.Text.Json.Serialization.JsonIgnore]
             public string? DangerouslyOverrideSignerPublicKey { get; set; }
             public string? ImportBundle { get; set; }
             public string? KeyFormat { get; set; }
@@ -116,6 +128,22 @@ namespace Turnkey
         public static class Math
         {
             public static Org.BouncyCastle.Math.BigInteger ModSqrt(Org.BouncyCastle.Math.BigInteger x, Org.BouncyCastle.Math.BigInteger p) { }
+        }
+        public static class SessionJwt
+        {
+            public static Turnkey.Crypto.SessionJwt.Claims Validate(string jwt, System.TimeSpan? clockSkew = default, string? dangerouslyOverrideNotarizerPublicKey = null) { }
+            public class Claims
+            {
+                public Claims() { }
+                public System.DateTimeOffset ExpiresAt { get; set; }
+                public System.DateTimeOffset? IssuedAt { get; set; }
+                public System.DateTimeOffset? NotBefore { get; set; }
+                public string? OrganizationId { get; set; }
+                public string PayloadJson { get; set; }
+                public string? PublicKey { get; set; }
+                public string? SessionType { get; set; }
+                public string? UserId { get; set; }
+            }
         }
     }
     public static class CryptoConstants

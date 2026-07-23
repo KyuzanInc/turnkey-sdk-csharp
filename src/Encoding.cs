@@ -74,8 +74,14 @@ namespace Turnkey
                 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         }
 
+        // `\z` (end of string), NOT `$`. In .NET `$` also matches immediately
+        // before a trailing "\n", so "deadbee\n" would pass the regex and then
+        // fail later inside the byte loop with a FormatException instead of the
+        // declared ArgumentException. JavaScript's `$` has no such allowance, so
+        // `\z` is what actually reproduces the upstream regex. This is a
+        // C#-specific divergence, not something inherited from upstream.
         private static readonly Regex HexRegex = new Regex(
-            "^[0-9A-Fa-f]+$",
+            @"^[0-9A-Fa-f]+\z",
             RegexOptions.Compiled);
 
         // ============================================================
@@ -120,14 +126,27 @@ namespace Turnkey
                 || hexString.Length % 2 != 0
                 || !HexRegex.IsMatch(hexString))
             {
+                // The rejected value is NOT echoed. Seven call sites reach this
+                // with private key material, and Crypto.cs re-wraps the message
+                // into its own exceptions ("Error decrypting bundle: ..."), so
+                // anything interpolated here surfaces to callers and to whatever
+                // logs the host writes. Only the length is reported, which is
+                // enough to diagnose a malformed key without disclosing it.
                 throw new ArgumentException(
-                    "cannot create uint8array from invalid hex string: \"" + hexString + "\"");
+                    "cannot create uint8array from invalid hex string: <redacted, length "
+                    + (hexString == null ? 0 : hexString.Length) + ">");
             }
 
             var buffer = new byte[hexString.Length / 2];
             for (int i = 0; i < buffer.Length; i++)
             {
-                buffer[i] = Convert.ToByte(hexString.Substring(i * 2, 2), 16);
+                // Nibble arithmetic rather than Convert.ToByte(Substring(..), 16):
+                // output-identical because HexRegex has already guaranteed every
+                // character is [0-9A-Fa-f], and it avoids minting one 2-char
+                // string per input byte — strings that would otherwise sit in the
+                // managed heap holding fragments of the decoded private key.
+                buffer[i] = (byte)((HexNibble(hexString[i * 2]) << 4)
+                                   | HexNibble(hexString[(i * 2) + 1]));
             }
 
             // Upstream uses `if (!length)`, which treats `0` as falsy/omitted.
@@ -147,6 +166,21 @@ namespace Turnkey
             // Left-pad: zeros at start, original bytes at the end.
             Array.Copy(buffer, 0, paddedBuffer, length.Value - buffer.Length, buffer.Length);
             return paddedBuffer;
+        }
+
+        /// <summary>
+        /// Maps a single hex digit to its 0-15 value. Callers must have already
+        /// validated the character against <see cref="HexRegex"/>.
+        /// </summary>
+        private static int HexNibble(char c)
+        {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+            // Unreachable: HexRegex rejects any non-hex character first. Kept so
+            // the precondition fails loudly rather than silently decoding wrong.
+            throw new ArgumentException(
+                "cannot create uint8array from invalid hex string: <redacted, non-hex character>");
         }
 
         /// <summary>

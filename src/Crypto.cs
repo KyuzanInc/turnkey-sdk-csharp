@@ -39,6 +39,7 @@
 //   - Newtonsoft.Json dependency dropped.
 
 using System;
+using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Org.BouncyCastle.Asn1;
@@ -110,6 +111,41 @@ namespace Turnkey
             /// <summary>Production notarizer used by Turnkey to sign session JWTs.</summary>
             public const string PRODUCTION_NOTARIZER_SIGN_PUBLIC_KEY =
                 "04d498aa87ac3bf982ac2b5dd9604d0074905cfbda5d62727c5a237b895e6749205e9f7cd566909c4387f6ca25c308445c60884b788560b785f4a96ac33702a469";
+        }
+
+        #endregion
+
+        #region Diagnostics
+
+        /// <summary>
+        /// Optional diagnostic sink for conditions upstream reports through
+        /// <c>console.warn</c>.
+        /// </summary>
+        /// <remarks>
+        /// The upstream TypeScript writes these warnings to the JavaScript
+        /// console. A .NET library has no equivalent ambient console to write
+        /// to, so this port drops them by default and lets the host opt in to
+        /// receiving them.
+        /// </remarks>
+        public static class Diagnostics
+        {
+            /// <summary>
+            /// Invoked with a human-readable message wherever upstream calls
+            /// <c>console.warn</c>. Defaults to <c>null</c> (warnings
+            /// discarded). Exceptions thrown by the handler propagate to the
+            /// caller of the SDK operation that raised the warning.
+            /// </summary>
+            /// <example>
+            /// <code>
+            /// Crypto.Diagnostics.OnWarning = msg => logger.LogWarning(msg);
+            /// </code>
+            /// </example>
+            public static Action<string>? OnWarning { get; set; }
+
+            internal static void Warn(string message)
+            {
+                OnWarning?.Invoke(message);
+            }
         }
 
         #endregion
@@ -251,6 +287,9 @@ namespace Turnkey
 
                 var result = new byte[length];
                 Array.Copy(okm, 0, result, 0, length);
+                // okm is a full HashLen-aligned expansion of the PRK; the
+                // bytes past `length` are unreturned key material.
+                CryptographicOperations.ZeroMemory(okm);
                 return result;
             }
         }
@@ -298,6 +337,21 @@ namespace Turnkey
             /// Override the production signer key for testing only. Equivalent
             /// to upstream <c>dangerouslyOverrideSignerPublicKey</c>.
             /// </summary>
+            /// <remarks>
+            /// Setting this replaces the pinned production trust anchor, so a
+            /// value reaching it from deserialized/user-controlled input
+            /// disables enclave signature verification entirely. It is marked
+            /// <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>
+            /// so no JSON payload can ever bind it, hidden from IntelliSense,
+            /// and obsoleted so every deliberate use is visible in build output.
+            /// </remarks>
+            [System.Text.Json.Serialization.JsonIgnore]
+            [EditorBrowsable(EditorBrowsableState.Never)]
+            [Obsolete(
+                "Test-only trust-anchor override. Setting this disables enclave signature "
+                + "verification against the pinned production signer key. Never set it from "
+                + "configuration, deserialized JSON, or any other untrusted input.",
+                error: false)]
             public string? DangerouslyOverrideSignerPublicKey { get; set; }
         }
 
@@ -317,6 +371,21 @@ namespace Turnkey
             /// Override the production signer key for testing only. Equivalent
             /// to upstream <c>dangerouslyOverrideSignerPublicKey</c>.
             /// </summary>
+            /// <remarks>
+            /// Setting this replaces the pinned production trust anchor, so a
+            /// value reaching it from deserialized/user-controlled input
+            /// disables enclave signature verification entirely. It is marked
+            /// <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>
+            /// so no JSON payload can ever bind it, hidden from IntelliSense,
+            /// and obsoleted so every deliberate use is visible in build output.
+            /// </remarks>
+            [System.Text.Json.Serialization.JsonIgnore]
+            [EditorBrowsable(EditorBrowsableState.Never)]
+            [Obsolete(
+                "Test-only trust-anchor override. Setting this disables enclave signature "
+                + "verification against the pinned production signer key. Never set it from "
+                + "configuration, deserialized JSON, or any other untrusted input.",
+                error: false)]
             public string? DangerouslyOverrideSignerPublicKey { get; set; }
         }
 
@@ -396,16 +465,19 @@ namespace Turnkey
         /// </exception>
         public static byte[] HpkeDecrypt(HpkeDecryptParams parameters)
         {
+            // Argument validation runs outside the try: a missing required
+            // parameter is a caller bug, not a decryption failure, and must not
+            // be relabelled as one.
+            if (parameters == null) throw new ArgumentNullException(nameof(parameters));
+            var ciphertextBuf = parameters.CiphertextBuf
+                                ?? throw new ArgumentNullException(nameof(parameters.CiphertextBuf));
+            var encappedKeyBuf = parameters.EncappedKeyBuf
+                                 ?? throw new ArgumentNullException(nameof(parameters.EncappedKeyBuf));
+            var receiverPriv = parameters.ReceiverPriv
+                               ?? throw new ArgumentNullException(nameof(parameters.ReceiverPriv));
+
             try
             {
-                if (parameters == null) throw new ArgumentNullException(nameof(parameters));
-                var ciphertextBuf = parameters.CiphertextBuf
-                                    ?? throw new ArgumentNullException(nameof(parameters.CiphertextBuf));
-                var encappedKeyBuf = parameters.EncappedKeyBuf
-                                     ?? throw new ArgumentNullException(nameof(parameters.EncappedKeyBuf));
-                var receiverPriv = parameters.ReceiverPriv
-                                   ?? throw new ArgumentNullException(nameof(parameters.ReceiverPriv));
-
                 var receiverPrivBytes = Encoding.Uint8ArrayFromHexString(receiverPriv);
                 var receiverPubBuf = GetPublicKey(receiverPrivBytes, false);
 
@@ -426,7 +498,7 @@ namespace Turnkey
 
                 return AesGcmDecrypt(ciphertextBuf, key, iv, aad);
             }
-            catch (Exception error)
+            catch (Exception error) when (!IsPassThrough(error))
             {
                 throw new InvalidOperationException(
                     "Unable to perform hpkeDecrypt: " + error.Message + " ", error);
@@ -461,7 +533,10 @@ namespace Turnkey
                 var senderPubBuf = Encoding.Uint8ArrayFromHexString(ephemeralKeyPair.PublicKeyUncompressed);
 
                 var aad = BuildAdditionalAssociatedData(senderPubBuf, targetKeyBuf);
-                var ss = DeriveSS(targetKeyBuf, Encoding.Uint8ArrayToHexString(senderPrivBuf));
+                // Pass the key bytes straight through. Round-tripping them via
+                // Uint8ArrayToHexString minted an extra copy of the ephemeral
+                // private key as an immutable, unclearable string.
+                var ss = DeriveSS(targetKeyBuf, senderPrivBuf);
                 var kemContext = GetKemContext(senderPubBuf, Encoding.Uint8ArrayToHexString(targetKeyBuf));
 
                 var ikm = BuildLabeledIkm(Constants.LABEL_EAE_PRK, ss, Constants.SUITE_ID_1);
@@ -479,7 +554,7 @@ namespace Turnkey
                 var compressedSenderBuf = CompressRawPublicKey(senderPubBuf);
                 return Encoding.ConcatUint8Arrays(compressedSenderBuf, encryptedData);
             }
-            catch (Exception error)
+            catch (Exception error) when (!IsPassThrough(error))
             {
                 throw new InvalidOperationException(
                     "Unable to perform hpkeEncrypt: " + error.Message, error);
@@ -501,26 +576,49 @@ namespace Turnkey
         /// </summary>
         /// <remarks>
         /// Upstream uses <c>slice(0, (1 + len) >>> 1)</c> then mutates the
-        /// prefix byte based on the last byte's LSB; for a valid 65-byte
-        /// SEC1 uncompressed key the result is the same 33-byte
-        /// <c>(0x02|0x03) || X</c> output. Defensive validation here only
-        /// rejects malformed input that upstream would also subsequently fail
-        /// on downstream.
+        /// prefix byte based on the last byte's LSB. For a well-formed 65-byte
+        /// SEC1 uncompressed key that yields the 33-byte
+        /// <c>(0x02|0x03) || X</c> output, and this port is byte-identical to
+        /// upstream on that input.
+        /// <para>
+        /// The permissive upstream slice semantics for every other length are
+        /// deliberately NOT reproduced, because they yield a silently corrupt
+        /// key for out-of-spec input: a bare 64-byte <c>X || Y</c> key (0x04
+        /// prefix stripped) slices to 32 bytes and is returned as a
+        /// "compressed key" with no error, and no counterparty can decode it.
+        /// <see cref="Encoding.PointEncode"/> already validates the same way
+        /// for the same operation.
+        /// </para>
         /// </remarks>
+        /// <exception cref="ArgumentException">
+        /// The key is not exactly
+        /// <see cref="Constants.UNCOMPRESSED_PUB_KEY_LENGTH_BYTES"/> bytes long
+        /// or does not start with the SEC1 uncompressed-point prefix 0x04.
+        /// </exception>
         public static byte[] CompressRawPublicKey(byte[] rawPublicKey)
         {
             if (rawPublicKey == null) throw new ArgumentNullException(nameof(rawPublicKey));
+
+            // ================= BEGIN ITEM 2 BLOCK =================
+            // Audit remediation item 2 (SHIPPING, revertible in isolation).
+            // To revert: delete this block and restore the `len == 0` early
+            // return that preceded it (see git history).
+            if (rawPublicKey.Length != Constants.UNCOMPRESSED_PUB_KEY_LENGTH_BYTES)
+            {
+                throw new ArgumentException(
+                    "failed to compress raw public key: expected 65 bytes, got "
+                    + rawPublicKey.Length, nameof(rawPublicKey));
+            }
+            if (rawPublicKey[0] != 0x04)
+            {
+                throw new ArgumentException(
+                    "failed to compress raw public key: expected SEC1 prefix 0x04",
+                    nameof(rawPublicKey));
+            }
+            // ================== END ITEM 2 BLOCK ==================
+
             int len = rawPublicKey.Length;
             // Upstream: var compressedBytes = rawPublicKey.slice(0, (1 + len) >>> 1);
-            // Empty input: TS produces an empty Uint8Array and the subsequent
-            // `compressedBytes[0] = 0x02 | (rawPublicKey[len-1]! & 0x01)` is a
-            // no-op (out-of-bounds typed-array assignment is ignored). Mirror
-            // that here so empty input returns an empty array instead of
-            // throwing.
-            if (len == 0)
-            {
-                return Array.Empty<byte>();
-            }
             int half = (1 + len) >> 1;
             var compressedBytes = new byte[half];
             Array.Copy(rawPublicKey, 0, compressedBytes, 0, half);
@@ -655,6 +753,20 @@ namespace Turnkey
                 throw new ArgumentNullException(nameof(encryptedCredentialBundle));
             if (embeddedKey == null)
                 throw new ArgumentNullException(nameof(embeddedKey));
+
+            // Length bound before the O(n^2) base58 decode. This is
+            // unauthenticated input: it is decoded before any checksum, HPKE or
+            // signature step can reject it, so the decode itself is the first
+            // attacker-reachable work. A real credential bundle is ~120
+            // characters; the bound is two orders of magnitude of headroom.
+            if (encryptedCredentialBundle.Length > MaxCredentialBundleLength)
+            {
+                throw new ArgumentException(
+                    "encrypted credential bundle is too long: " + encryptedCredentialBundle.Length
+                    + " characters, maximum is " + MaxCredentialBundleLength + ".",
+                    nameof(encryptedCredentialBundle));
+            }
+
             try
             {
                 // Upstream uses bs58check.decode exclusively (NO raw bs58 fallback).
@@ -680,7 +792,7 @@ namespace Turnkey
                 });
                 return Encoding.Uint8ArrayToHexString(decryptedData);
             }
-            catch (Exception error)
+            catch (Exception error) when (!(error is OutOfMemoryException))
             {
                 throw new InvalidOperationException(
                     "\"Error decrypting bundle:\", " + error.Message, error);
@@ -721,11 +833,18 @@ namespace Turnkey
             string? dataSignature = GetStringOrNull(parsedImportBundle, "dataSignature");
             string? signedDataHex = GetStringOrNull(parsedImportBundle, "data");
 
+            // CS0618: reading the deliberately-obsoleted test-only override is
+            // the whole point of this call; the attribute exists to flag
+            // *callers* who set it, not the SDK plumbing that honours it.
+#pragma warning disable 618
+            string? signerOverride = parameters.DangerouslyOverrideSignerPublicKey;
+#pragma warning restore 618
+
             bool verified = VerifyEnclaveSignature(
                 enclaveQuorumPublic,
                 dataSignature,
                 signedDataHex,
-                parameters.DangerouslyOverrideSignerPublicKey);
+                signerOverride);
             if (!verified)
             {
                 throw new InvalidOperationException(
@@ -794,11 +913,16 @@ namespace Turnkey
                 string? dataSignature = GetStringOrNull(parsedExportBundle, "dataSignature");
                 string? dataHex = GetStringOrNull(parsedExportBundle, "data");
 
+                // CS0618: see the matching note in EncryptPrivateKeyToBundle.
+#pragma warning disable 618
+                string? signerOverride = parameters.DangerouslyOverrideSignerPublicKey;
+#pragma warning restore 618
+
                 bool verified = VerifyEnclaveSignature(
                     enclaveQuorumPublic,
                     dataSignature,
                     dataHex,
-                    parameters.DangerouslyOverrideSignerPublicKey);
+                    signerOverride);
                 if (!verified)
                 {
                     throw new InvalidOperationException(
@@ -835,32 +959,58 @@ namespace Turnkey
                     ReceiverPriv = parameters.EmbeddedKey,
                 });
 
-                if (string.Equals(parameters.KeyFormat, "SOLANA", StringComparison.Ordinal)
-                    && !parameters.ReturnMnemonic)
+                try
                 {
-                    if (decryptedData.Length != 32)
+                    if (string.Equals(parameters.KeyFormat, "SOLANA", StringComparison.Ordinal)
+                        && !parameters.ReturnMnemonic)
                     {
-                        throw new InvalidOperationException(
-                            "invalid private key length. Expected 32 bytes. Got " + decryptedData.Length + ".");
+                        if (decryptedData.Length != 32)
+                        {
+                            throw new InvalidOperationException(
+                                "invalid private key length. Expected 32 bytes. Got " + decryptedData.Length + ".");
+                        }
+                        // Derive Ed25519 public key from the 32-byte seed via BouncyCastle.
+                        var ed25519PrivKey = new Ed25519PrivateKeyParameters(decryptedData, 0);
+                        var publicKeyBytes = ed25519PrivKey.GeneratePublicKey().GetEncoded();
+                        if (publicKeyBytes.Length != 32)
+                        {
+                            throw new InvalidOperationException(
+                                "invalid public key length. Expected 32 bytes. Got " + publicKeyBytes.Length + ".");
+                        }
+                        var concatenated = new byte[64];
+                        try
+                        {
+                            Array.Copy(decryptedData, 0, concatenated, 0, 32);
+                            Array.Copy(publicKeyBytes, 0, concatenated, 32, 32);
+                            return Encoding.Base58Encode(concatenated);
+                        }
+                        finally
+                        {
+                            // Full Solana keypair (seed || public key).
+                            CryptographicOperations.ZeroMemory(concatenated);
+                        }
                     }
-                    // Derive Ed25519 public key from the 32-byte seed via BouncyCastle.
-                    var ed25519PrivKey = new Ed25519PrivateKeyParameters(decryptedData, 0);
-                    var publicKeyBytes = ed25519PrivKey.GeneratePublicKey().GetEncoded();
-                    if (publicKeyBytes.Length != 32)
-                    {
-                        throw new InvalidOperationException(
-                            "invalid public key length. Expected 32 bytes. Got " + publicKeyBytes.Length + ".");
-                    }
-                    var concatenated = new byte[64];
-                    Array.Copy(decryptedData, 0, concatenated, 0, 32);
-                    Array.Copy(publicKeyBytes, 0, concatenated, 32, 32);
-                    return Encoding.Base58Encode(concatenated);
-                }
 
-                var decryptedHex = Encoding.Uint8ArrayToHexString(decryptedData);
-                return parameters.ReturnMnemonic ? Encoding.HexToAscii(decryptedHex) : decryptedHex;
+                    if (parameters.ReturnMnemonic)
+                    {
+                        // Strict UTF-8 decode. Encoding.HexToAscii widens each
+                        // byte to a char (latin-1), which corrupts every
+                        // non-English BIP-39 wordlist — the Japanese list is 3
+                        // bytes per character, so each character came back as
+                        // three mojibake chars. Pure-ASCII mnemonics are
+                        // unaffected, so the pinned English vector is
+                        // byte-identical either way.
+                        return StrictUtf8.GetString(decryptedData);
+                    }
+                    return Encoding.Uint8ArrayToHexString(decryptedData);
+                }
+                finally
+                {
+                    // decryptedData is the exported seed phrase / private key.
+                    CryptographicOperations.ZeroMemory(decryptedData);
+                }
             }
-            catch (Exception error)
+            catch (Exception error) when (!(error is OutOfMemoryException))
             {
                 throw new InvalidOperationException(
                     "Error decrypting bundle: " + error.Message, error);
@@ -907,19 +1057,295 @@ namespace Turnkey
                 msgDigest = sha256.ComputeHash(h1);
             }
 
-            byte[] signature = Base64UrlDecode(signatureB64);
+            byte[] signature;
+            try
+            {
+                signature = Base64UrlDecode(signatureB64);
+            }
+            catch (FormatException)
+            {
+                // A malformed signature segment is an unverified signature,
+                // not an exceptional condition for a bool-returning verify.
+                // Previously this leaked an undeclared FormatException.
+                return false;
+            }
+
             var publicKey = Encoding.Uint8ArrayFromHexString(notarizerKeyHex);
             return VerifyP256RawSignature(publicKey, signature, msgDigest);
+        }
+
+        /// <summary>
+        /// Full validation of a Turnkey session JWT: signature, structure and
+        /// the time-based claims.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="VerifySessionJwtSignature"/> answers exactly one
+        /// question — "was this signed by the notarizer?" — and is kept
+        /// byte-for-byte faithful to upstream, including upstream's acceptance
+        /// of a token carrying more than three segments. It says nothing about
+        /// whether the session is still live, so on its own it will happily
+        /// accept a JWT that expired months ago. This class is the
+        /// accept/reject decision built on top of it.
+        /// </remarks>
+        public static class SessionJwt
+        {
+            /// <summary>
+            /// The claim set of a session JWT that passed
+            /// <see cref="Validate"/>. Only ever produced for a token whose
+            /// signature verified.
+            /// </summary>
+            public class Claims
+            {
+                /// <summary>Turnkey organization id (<c>organization_id</c>).</summary>
+                public string? OrganizationId { get; set; }
+
+                /// <summary>Turnkey user id (<c>user_id</c>).</summary>
+                public string? UserId { get; set; }
+
+                /// <summary>Session public key, compressed P-256 hex (<c>public_key</c>).</summary>
+                public string? PublicKey { get; set; }
+
+                /// <summary>Session type, e.g. <c>SESSION_TYPE_READ_WRITE</c>.</summary>
+                public string? SessionType { get; set; }
+
+                /// <summary>Expiry from the required <c>exp</c> claim.</summary>
+                public DateTimeOffset ExpiresAt { get; set; }
+
+                /// <summary>Start of validity from the optional <c>nbf</c> claim.</summary>
+                public DateTimeOffset? NotBefore { get; set; }
+
+                /// <summary>Issue time from the optional <c>iat</c> claim.</summary>
+                public DateTimeOffset? IssuedAt { get; set; }
+
+                /// <summary>
+                /// The decoded payload segment verbatim, for claims this type
+                /// does not model.
+                /// </summary>
+                public string PayloadJson { get; set; } = string.Empty;
+            }
+
+            /// <summary>
+            /// Verifies the notarizer signature and enforces the structural and
+            /// time-based constraints, returning the claims on success.
+            /// </summary>
+            /// <param name="jwt">The compact-serialization JWT to validate.</param>
+            /// <param name="clockSkew">
+            /// Allowance for clock drift between this host and the notarizer,
+            /// applied to both <c>exp</c> and <c>nbf</c>. Defaults to
+            /// <see cref="TimeSpan.Zero"/>.
+            /// </param>
+            /// <param name="dangerouslyOverrideNotarizerPublicKey">
+            /// Test-only notarizer key override, forwarded to
+            /// <see cref="VerifySessionJwtSignature"/>. Leave null in
+            /// production so the pinned notarizer key is used.
+            /// </param>
+            /// <returns>The validated claims.</returns>
+            /// <exception cref="ArgumentNullException"><paramref name="jwt"/> is null.</exception>
+            /// <exception cref="ArgumentOutOfRangeException"><paramref name="clockSkew"/> is negative.</exception>
+            /// <exception cref="InvalidOperationException">
+            /// The token is malformed, its signature does not verify, it has
+            /// expired, or it is not yet valid.
+            /// </exception>
+            public static Claims Validate(
+                string jwt,
+                TimeSpan? clockSkew = null,
+                string? dangerouslyOverrideNotarizerPublicKey = null)
+            {
+                if (jwt == null) throw new ArgumentNullException(nameof(jwt));
+
+                var skew = clockSkew ?? TimeSpan.Zero;
+                if (skew < TimeSpan.Zero)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(clockSkew), "clock skew must not be negative");
+                }
+
+                // EXACTLY three segments. VerifySessionJwtSignature preserves
+                // upstream's `parts.length < 3`, under which "header.payload.sig.junk"
+                // verifies true against the same signature as
+                // "header.payload.sig" — a second wire spelling of one token.
+                var parts = jwt.Split('.');
+                if (parts.Length != 3)
+                {
+                    throw new InvalidOperationException(
+                        "invalid JWT: expected exactly 3 segments, got " + parts.Length);
+                }
+                if (parts[0].Length == 0 || parts[1].Length == 0 || parts[2].Length == 0)
+                {
+                    throw new InvalidOperationException("invalid JWT: empty segment");
+                }
+
+                // Signature first: no claim is read out of an unverified token.
+                // Note the header's "alg" is never consulted — the notarizer
+                // key is pinned to P-256 — so algorithm confusion is not
+                // reachable here.
+                if (!VerifySessionJwtSignature(jwt, dangerouslyOverrideNotarizerPublicKey))
+                {
+                    throw new InvalidOperationException("invalid JWT: signature verification failed");
+                }
+
+                string payloadJson;
+                try
+                {
+                    payloadJson = StrictUtf8.GetString(Base64UrlDecode(parts[1]));
+                }
+                catch (Exception error) when (
+                    error is FormatException || error is System.Text.DecoderFallbackException)
+                {
+                    throw new InvalidOperationException(
+                        "invalid JWT: payload segment is not canonical base64url UTF-8", error);
+                }
+
+                JsonElement root;
+                JsonDocument doc;
+                try
+                {
+                    doc = JsonDocument.Parse(payloadJson);
+                }
+                catch (JsonException error)
+                {
+                    throw new InvalidOperationException("invalid JWT: payload is not valid JSON", error);
+                }
+
+                using (doc)
+                {
+                    root = doc.RootElement;
+                    if (root.ValueKind != JsonValueKind.Object)
+                    {
+                        throw new InvalidOperationException("invalid JWT: payload is not a JSON object");
+                    }
+
+                    var now = DateTimeOffset.UtcNow;
+                    var claims = new Claims
+                    {
+                        OrganizationId = GetStringOrNull(root, "organization_id"),
+                        UserId = GetStringOrNull(root, "user_id"),
+                        PublicKey = GetStringOrNull(root, "public_key"),
+                        SessionType = GetStringOrNull(root, "session_type"),
+                        PayloadJson = payloadJson,
+                    };
+
+                    if (TryGetNumericDate(root, "nbf", out var notBefore))
+                    {
+                        claims.NotBefore = notBefore;
+                        if (now + skew < notBefore)
+                        {
+                            throw new InvalidOperationException(
+                                "JWT is not yet valid: nbf is " + notBefore.ToUnixTimeSeconds()
+                                + ", now is " + now.ToUnixTimeSeconds() + ".");
+                        }
+                    }
+
+                    if (TryGetNumericDate(root, "iat", out var issuedAt))
+                    {
+                        claims.IssuedAt = issuedAt;
+                    }
+
+                    // exp is required: a session token with no expiry is a
+                    // permanent credential.
+                    if (!TryGetNumericDate(root, "exp", out var expiresAt))
+                    {
+                        throw new InvalidOperationException(
+                            "invalid JWT: missing or non-numeric \"exp\" claim");
+                    }
+                    claims.ExpiresAt = expiresAt;
+                    if (now - skew >= expiresAt)
+                    {
+                        throw new InvalidOperationException(
+                            "JWT expired: exp is " + expiresAt.ToUnixTimeSeconds()
+                            + ", now is " + now.ToUnixTimeSeconds() + ".");
+                    }
+
+                    return claims;
+                }
+            }
+
+            /// <summary>
+            /// Reads an RFC 7519 NumericDate claim. Only a JSON number is
+            /// accepted; a string-encoded timestamp is treated as absent.
+            /// </summary>
+            private static bool TryGetNumericDate(JsonElement root, string name, out DateTimeOffset value)
+            {
+                value = default;
+                if (!root.TryGetProperty(name, out var element)
+                    || element.ValueKind != JsonValueKind.Number
+                    || !element.TryGetInt64(out long seconds))
+                {
+                    return false;
+                }
+                try
+                {
+                    value = DateTimeOffset.FromUnixTimeSeconds(seconds);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    return false;
+                }
+                return true;
+            }
         }
 
         #endregion
 
         #region Private helpers
 
+        /// <summary>
+        /// Maximum accepted length, in characters, of an encrypted credential
+        /// bundle. A genuine bundle is roughly 120 characters.
+        /// </summary>
+        private const int MaxCredentialBundleLength = 1024;
+
+        /// <summary>
+        /// UTF-8 decoder that throws on malformed byte sequences instead of
+        /// silently substituting U+FFFD.
+        /// </summary>
+        private static readonly System.Text.UTF8Encoding StrictUtf8 =
+            new System.Text.UTF8Encoding(
+                encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+        /// <summary>
+        /// Exceptions the HPKE catch blocks must let escape instead of
+        /// relabelling as <see cref="InvalidOperationException"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="OutOfMemoryException"/> reports process-wide resource
+        /// exhaustion. Reporting it as "hpkeDecrypt failed" hides the real
+        /// fault and, on the bundle paths, an actual resource-exhaustion
+        /// attempt.
+        /// </para>
+        /// <para>
+        /// An <see cref="ArgumentException"/> escaping the HPKE primitives
+        /// means malformed key material — bad hex, an out-of-range scalar, an
+        /// invalid curve point — which is a caller error worth surfacing with
+        /// its own type and message.
+        /// </para>
+        /// <para>
+        /// <see cref="ArgumentNullException"/> is deliberately NOT passed
+        /// through: the established contract for a missing required member of
+        /// an HPKE parameters object is the wrapped upstream message, and
+        /// callers assert on it.
+        /// </para>
+        /// </remarks>
+        private static bool IsPassThrough(Exception error)
+        {
+            return error is OutOfMemoryException
+                || (error is ArgumentException && !(error is ArgumentNullException));
+        }
+
+        /// <summary>
+        /// Hex-string overload of <see cref="DeriveSS(byte[], byte[])"/>. Kept
+        /// for the <see cref="HpkeDecrypt"/> path, whose receiver private key
+        /// is supplied as hex by the caller.
+        /// </summary>
         private static byte[] DeriveSS(byte[] encappedKeyBuf, string privHex)
         {
+            return DeriveSS(encappedKeyBuf, Encoding.Uint8ArrayFromHexString(privHex));
+        }
+
+        private static byte[] DeriveSS(byte[] encappedKeyBuf, byte[] privBytes)
+        {
             // Upstream noble p256.getSharedSecret validates the private scalar.
-            var privBytes = Encoding.Uint8ArrayFromHexString(privHex);
             var (d, domainParams) = ValidateAndDeserializeP256PrivateKey(privBytes);
             var privateKeyParams = new ECPrivateKeyParameters(d, domainParams);
 
@@ -929,15 +1355,12 @@ namespace Turnkey
             var agreement = new ECDHBasicAgreement();
             agreement.Init(privateKeyParams);
             var sharedSecretBig = agreement.CalculateAgreement(publicKeyParams);
-            var ss = sharedSecretBig.ToByteArrayUnsigned();
 
-            if (ss.Length < 32)
-            {
-                var padded = new byte[32];
-                Array.Copy(ss, 0, padded, 32 - ss.Length, ss.Length);
-                ss = padded;
-            }
-            return ss;
+            // Fixed-width left pad. The previous ToByteArrayUnsigned() +
+            // conditional Array.Copy produced identical bytes but branched on
+            // the number of leading zero bytes of the shared secret, i.e. on
+            // secret data. AsUnsignedByteArray(32, ...) is unconditional.
+            return Org.BouncyCastle.Utilities.BigIntegers.AsUnsignedByteArray(32, sharedSecretBig);
         }
 
         /// <summary>
@@ -1001,7 +1424,16 @@ namespace Turnkey
         private static byte[] ExtractAndExpand(byte[] sharedSecret, byte[] ikm, byte[] info, int len)
         {
             var prk = Hkdf.Extract(sharedSecret, ikm);
-            return Hkdf.Expand(prk, info, len);
+            try
+            {
+                return Hkdf.Expand(prk, info, len);
+            }
+            finally
+            {
+                // prk is the HKDF pseudo-random key; every AES key and IV in
+                // this suite derives from it.
+                CryptographicOperations.ZeroMemory(prk);
+            }
         }
 
         private static byte[] AesGcmDecrypt(byte[] encryptedData, byte[] key, byte[] iv, byte[] aad)
@@ -1026,15 +1458,75 @@ namespace Turnkey
             return output;
         }
 
+        /// <summary>
+        /// Strict, canonical-only base64url ("base64url without padding",
+        /// RFC 4648 §5) decode.
+        /// </summary>
+        /// <remarks>
+        /// A JWS signature segment is attacker-supplied, so every accepted
+        /// spelling of one signature is a distinct wire form for the same
+        /// verified token. The naive
+        /// <c>Replace('-','+').Replace('_','/')</c> + <c>FromBase64String</c>
+        /// decode admitted three families of alternate spellings:
+        /// standard-base64 <c>+</c>/<c>/</c>, <c>=</c> padding and embedded
+        /// whitespace (both silently tolerated by
+        /// <see cref="Convert.FromBase64String"/>), and non-zero trailing bits
+        /// in the final character (16 characters encode the same trailing
+        /// 64th byte of a P-256 signature). All three are rejected here.
+        /// </remarks>
+        /// <exception cref="FormatException">
+        /// The input is not canonical unpadded base64url.
+        /// </exception>
         private static byte[] Base64UrlDecode(string input)
         {
-            var output = input.Replace('-', '+').Replace('_', '/');
-            switch (output.Length % 4)
+            if (input == null) throw new ArgumentNullException(nameof(input));
+
+            // Alphabet check. Rejects '+', '/', '=', whitespace and anything
+            // else Convert.FromBase64String would have silently accepted or
+            // re-interpreted.
+            for (int i = 0; i < input.Length; i++)
             {
-                case 2: output += "=="; break;
-                case 3: output += "="; break;
+                char c = input[i];
+                bool inAlphabet =
+                    (c >= 'A' && c <= 'Z')
+                    || (c >= 'a' && c <= 'z')
+                    || (c >= '0' && c <= '9')
+                    || c == '-' || c == '_';
+                if (!inAlphabet)
+                {
+                    throw new FormatException(
+                        "invalid base64url: character at index " + i + " is outside the alphabet");
+                }
             }
-            return Convert.FromBase64String(output);
+
+            // A trailing group of one character carries 6 bits and cannot
+            // complete a byte, so no byte string encodes to length % 4 == 1.
+            if (input.Length % 4 == 1)
+            {
+                throw new FormatException("invalid base64url: length " + input.Length + " is not decodable");
+            }
+
+            var padded = input.Replace('-', '+').Replace('_', '/');
+            switch (padded.Length % 4)
+            {
+                case 2: padded += "=="; break;
+                case 3: padded += "="; break;
+            }
+            var decoded = Convert.FromBase64String(padded);
+
+            // Canonical form check: re-encoding the decoded bytes must
+            // reproduce the input exactly. This is what rejects a final
+            // character whose unused low bits are non-zero.
+            var reencoded = Convert.ToBase64String(decoded)
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_');
+            if (!string.Equals(reencoded, input, StringComparison.Ordinal))
+            {
+                throw new FormatException("invalid base64url: non-canonical encoding");
+            }
+
+            return decoded;
         }
 
         private static bool VerifyP256RawSignature(byte[] publicKeyBytes, byte[] signatureRaw, byte[] messageDigest)
@@ -1124,10 +1616,25 @@ namespace Turnkey
         /// <summary>
         /// Equivalent to upstream <c>turnkey.ts decodeKey</c>. Default and
         /// unknown <paramref name="keyFormat"/> values fall back to hex
-        /// parsing exactly like upstream <c>default:</c> branch.
+        /// parsing exactly like upstream <c>default:</c> branch, and report the
+        /// fallback through <see cref="Diagnostics.OnWarning"/>.
         /// </summary>
         private static byte[] DecodeKey(string privateKey, string? keyFormat)
         {
+            if (!string.Equals(keyFormat, "SOLANA", StringComparison.Ordinal)
+                && !string.Equals(keyFormat, "HEXADECIMAL", StringComparison.Ordinal))
+            {
+                // Upstream turnkey.ts:299-302 default: branch —
+                //   console.warn(`invalid key format: ${keyFormat}. Defaulting to HEXADECIMAL.`)
+                // A silently misinterpreted key format is how a caller ends up
+                // importing the wrong bytes, so the fallback has to be
+                // observable. `undefined` (not `null`) keeps the rendered text
+                // identical to the upstream template literal for an omitted
+                // keyFormat.
+                Diagnostics.Warn(
+                    "invalid key format: " + (keyFormat ?? "undefined") + ". Defaulting to HEXADECIMAL.");
+            }
+
             if (string.Equals(keyFormat, "SOLANA", StringComparison.Ordinal))
             {
                 var decoded = Encoding.Base58Decode(privateKey);
@@ -1141,8 +1648,7 @@ namespace Turnkey
                 return first32;
             }
             // HEXADECIMAL (and unknown fallback). Upstream "default:" branch
-            // also accepts the unknown case by falling through to hex parsing
-            // (it logs a warn; this port silently matches the behavior).
+            // also accepts the unknown case by falling through to hex parsing.
             string normalized = privateKey.StartsWith("0x", StringComparison.Ordinal)
                 ? privateKey.Substring(2)
                 : privateKey;

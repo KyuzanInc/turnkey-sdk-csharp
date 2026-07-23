@@ -170,6 +170,139 @@ namespace Turnkey.Tests
         }
 
         [Fact]
+        public void SignWithApiKey_UpperCaseConfiguredPublicKey_IsAccepted()
+        {
+            // The keypair is valid; only the hex spelling of the configured
+            // public key differs. An ordinal string comparison rejected it and
+            // reported "expected X, got Y" with two values that read as
+            // identical. The comparison is over decoded bytes now.
+            var stamper = new ApiKeyStamper(FixturePublicKey.ToUpperInvariant(), FixturePrivateKey);
+
+            string sigHex = stamper.SignWithApiKey("payload");
+
+            AssertSignatureVerifies(FixturePublicKey, "payload", HexToBytes(sigHex));
+        }
+
+        [Fact]
+        public void SignWithApiKey_PublicKeyCasing_DoesNotAffectSignatureBytes()
+        {
+            string lowerSig = new ApiKeyStamper(FixturePublicKey, FixturePrivateKey)
+                .SignWithApiKey("payload");
+            string upperSig = new ApiKeyStamper(FixturePublicKey.ToUpperInvariant(), FixturePrivateKey)
+                .SignWithApiKey("payload");
+
+            upperSig.Should().Be(lowerSig);
+        }
+
+        [Fact]
+        public void Stamp_UpperCaseConfiguredPublicKey_IsEmbeddedCanonicalized()
+        {
+            // Accepting either spelling made this path reachable for the first
+            // time (it previously threw), so the stamp must not forward an
+            // unusual spelling to the backend. The value embedded is the
+            // canonical lower-case key derived from the private key, not the
+            // caller's configured spelling.
+            var stamper = new ApiKeyStamper(FixturePublicKey.ToUpperInvariant(), FixturePrivateKey);
+
+            var result = stamper.Stamp("hello");
+
+            string decodedJson = Encoding.DecodeBase64UrlToString(result.StampHeaderValue);
+            using var doc = JsonDocument.Parse(decodedJson);
+            doc.RootElement.GetProperty("publicKey").GetString()
+                .Should().Be(FixturePublicKey);
+        }
+
+        [Fact]
+        public void Stamp_LowerCaseConfiguredPublicKey_WireBytesAreUnchanged()
+        {
+            // The regression that actually matters for canonicalizing the
+            // embedded public key: the normal lower-case path must emit exactly
+            // the bytes it emitted before that change. This golden value was
+            // captured by running Stamp() against the pre-change implementation,
+            // so it is independent of the current code rather than a snapshot of
+            // whatever it happens to produce today.
+            const string preChangeStampHeaderValue =
+                "eyJwdWJsaWNLZXkiOiIwMmY3MzlmOGM3N2IzMmY0ZDVmMTMyNjU4NjFmZWJkNzZlN2E5YzYxYTExNDBkMjk2"
+                + "YjhjMTYzMDI1MDg4NzAzMTYiLCJzY2hlbWUiOiJTSUdOQVRVUkVfU0NIRU1FX1RLX0FQSV9QMjU2Iiwic2ln"
+                + "bmF0dXJlIjoiMzA0NDAyMjA0YWVlN2E4ZTA0NDM2ZWNkMGVhMTZlNzRlYWFiY2MyYjUzYzBjMDdjOTdjMmQx"
+                + "NmZiY2RkMTA1NTI2OTFlMjkwMDIyMDBhYTYzMjAyYjhlNTYzNGRhYTk2MTA0Zjk0NzEzNjliNzhhNDAxNzVi"
+                + "ZWMzZTAwYzQzMjU5ZGRkMjBlNjY2MGIifQ";
+
+            var stamper = new ApiKeyStamper(FixturePublicKey, FixturePrivateKey);
+
+            stamper.Stamp("hello").StampHeaderValue
+                .Should().Be(preChangeStampHeaderValue);
+        }
+
+        [Fact]
+        public void Stamp_PublicKeyCasing_DoesNotAffectWireBytes()
+        {
+            // Canonicalization on emit means the whole stamp — not just the
+            // signature — is byte-identical regardless of configured spelling.
+            var lower = new ApiKeyStamper(FixturePublicKey, FixturePrivateKey).Stamp("hello");
+            var upper = new ApiKeyStamper(FixturePublicKey.ToUpperInvariant(), FixturePrivateKey)
+                .Stamp("hello");
+
+            upper.StampHeaderValue.Should().Be(lower.StampHeaderValue);
+        }
+
+        [Fact]
+        public void SignWithApiKey_MalformedConfiguredPublicKey_ThrowsBadApiKey()
+        {
+            // A public key that cannot be hex-decoded must still surface as the
+            // "Bad API key" mismatch, not as an ArgumentException escaping from
+            // the hex decoder.
+            var stamper = new ApiKeyStamper("not-hex", FixturePrivateKey);
+
+            Action act = () => stamper.SignWithApiKey("payload");
+
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("Bad API key. Expected to get public key*");
+        }
+
+        [Fact]
+        public void SignWithApiKey_NullConfiguredPublicKey_ThrowsBadApiKey()
+        {
+            var stamper = new ApiKeyStamper(null!, FixturePrivateKey);
+
+            Action act = () => stamper.SignWithApiKey("payload");
+
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("Bad API key. Expected to get public key*");
+        }
+
+        [Fact]
+        public void SignWithApiKey_InvalidHexPrivateKey_DoesNotEchoTheKey()
+        {
+            const string keyShaped =
+                "00112233445566778899aabbccddeeff00112233445566778899aabbccddeezz";
+            var stamper = new ApiKeyStamper(FixturePublicKey, keyShaped);
+
+            Action act = () => stamper.SignWithApiKey("payload");
+
+            var message = act.Should().Throw<ArgumentException>().Which.Message;
+            message.Should().NotContain(keyShaped);
+            message.Should().NotContain("00112233");
+        }
+
+        [Fact]
+        public void SignWithApiKey_RepeatedCalls_StayStableAfterKeyBufferZeroing()
+        {
+            // The decoded private key is zeroed in a finally on every call. The
+            // stamper must therefore re-decode from the configured string each
+            // time rather than depend on a buffer it has already wiped.
+            var stamper = new ApiKeyStamper(FixturePublicKey, FixturePrivateKey);
+            string first = stamper.SignWithApiKey("payload");
+
+            for (int i = 0; i < 5; i++)
+            {
+                stamper.SignWithApiKey("noise " + i);
+            }
+
+            stamper.SignWithApiKey("payload").Should().Be(first);
+        }
+
+        [Fact]
         public void Stamp_HeaderConstantsAndScheme()
         {
             ApiKeyStamper.StampHeaderName.Should().Be("X-Stamp");

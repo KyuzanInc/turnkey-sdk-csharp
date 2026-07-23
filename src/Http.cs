@@ -38,6 +38,7 @@
 //   signature always verifies against the exact body delivered.
 
 using System;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Turnkey
@@ -65,6 +66,7 @@ namespace Turnkey
             {
                 throw new ArgumentException("baseUrl is required", nameof(baseUrl));
             }
+
             _baseUrl = baseUrl;
         }
 
@@ -100,12 +102,24 @@ namespace Turnkey
 
             var apiPrivateKey = Crypto.DecryptCredentialBundle(encryptedCredentialBundle, targetPrivateKey);
             var apiPrivateKeyBytes = Encoding.Uint8ArrayFromHexString(apiPrivateKey);
-            var apiPublicKeyBytes = Crypto.GetPublicKey(apiPrivateKeyBytes, isCompressed: true);
+            try
+            {
+                var apiPublicKeyBytes = Crypto.GetPublicKey(apiPrivateKeyBytes, isCompressed: true);
+                var apiPublicKey = Encoding.Uint8ArrayToHexString(apiPublicKeyBytes);
 
-            var normalizedPrivateKey = Encoding.Uint8ArrayToHexString(apiPrivateKeyBytes);
-            var apiPublicKey = Encoding.Uint8ArrayToHexString(apiPublicKeyBytes);
-
-            return new Http(new ApiKeyStamper(apiPublicKey, normalizedPrivateKey), baseUrl);
+                // `apiPrivateKey` is handed to the stamper as-is. It already came
+                // out of Crypto.DecryptCredentialBundle as lower-case hex (that
+                // method returns Encoding.Uint8ArrayToHexString(...)), so the
+                // round-trip through Uint8ArrayFromHexString/Uint8ArrayToHexString
+                // that used to sit here produced a byte-identical string — its
+                // only lasting effect was a second immutable, unerasable copy of
+                // the private key on the managed heap.
+                return new Http(new ApiKeyStamper(apiPublicKey, apiPrivateKey), baseUrl);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(apiPrivateKeyBytes);
+            }
         }
 
         /// <summary>
@@ -131,11 +145,23 @@ namespace Turnkey
                     "Target private key was not valid hex", nameof(targetPrivateKey));
             }
 
-            var normalizedPrivateKey = Encoding.Uint8ArrayToHexString(privateKeyBytes);
-            var publicKeyBytes = Crypto.GetPublicKey(privateKeyBytes, isCompressed: true);
-            var publicKeyHex = Encoding.Uint8ArrayToHexString(publicKeyBytes);
+            try
+            {
+                // Unlike GetHttpClient above, this normalization is NOT
+                // redundant: targetPrivateKey is caller-supplied and may be
+                // upper-case hex. The stamper's own public key ends up embedded
+                // in the stamp JSON, so the spelling that reaches it is part of
+                // the wire format and must stay lower-case.
+                var normalizedPrivateKey = Encoding.Uint8ArrayToHexString(privateKeyBytes);
+                var publicKeyBytes = Crypto.GetPublicKey(privateKeyBytes, isCompressed: true);
+                var publicKeyHex = Encoding.Uint8ArrayToHexString(publicKeyBytes);
 
-            return new Http(new ApiKeyStamper(publicKeyHex, normalizedPrivateKey), baseUrl);
+                return new Http(new ApiKeyStamper(publicKeyHex, normalizedPrivateKey), baseUrl);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(privateKeyBytes);
+            }
         }
 
         // ===== Activity stampers =====
@@ -149,6 +175,7 @@ namespace Turnkey
             {
                 throw new ArgumentException("Organization ID is required", nameof(organizationId));
             }
+            RequireWellFormedUtf16(organizationId, "organizationId", nameof(organizationId));
             var body = new WhoamiRequestBody { OrganizationId = organizationId };
             return CreateSignedRequest(
                 _baseUrl + "/public/v1/query/whoami",
@@ -161,6 +188,7 @@ namespace Turnkey
         public SignedRequest StampInitImportPrivateKey(InitImportPrivateKeyRequestBody body)
         {
             if (body == null) throw new ArgumentNullException(nameof(body));
+            ValidateWireStrings(body);
             return CreateSignedRequest(
                 _baseUrl + "/public/v1/submit/init_import_private_key",
                 JsonSerializer.Serialize(body, typeof(InitImportPrivateKeyRequestBody), TurnkeyJsonContext.JsCompatibleOptions));
@@ -172,6 +200,7 @@ namespace Turnkey
         public SignedRequest StampImportPrivateKey(ImportPrivateKeyRequestBody body)
         {
             if (body == null) throw new ArgumentNullException(nameof(body));
+            ValidateWireStrings(body);
             return CreateSignedRequest(
                 _baseUrl + "/public/v1/submit/import_private_key",
                 JsonSerializer.Serialize(body, typeof(ImportPrivateKeyRequestBody), TurnkeyJsonContext.JsCompatibleOptions));
@@ -183,6 +212,7 @@ namespace Turnkey
         public SignedRequest StampExportPrivateKey(ExportPrivateKeyRequestBody body)
         {
             if (body == null) throw new ArgumentNullException(nameof(body));
+            ValidateWireStrings(body);
             return CreateSignedRequest(
                 _baseUrl + "/public/v1/submit/export_private_key",
                 JsonSerializer.Serialize(body, typeof(ExportPrivateKeyRequestBody), TurnkeyJsonContext.JsCompatibleOptions));
@@ -194,9 +224,143 @@ namespace Turnkey
         public SignedRequest StampExportWalletAccount(ExportWalletAccountRequestBody body)
         {
             if (body == null) throw new ArgumentNullException(nameof(body));
+            ValidateWireStrings(body);
             return CreateSignedRequest(
                 _baseUrl + "/public/v1/submit/export_wallet_account",
                 JsonSerializer.Serialize(body, typeof(ExportWalletAccountRequestBody), TurnkeyJsonContext.JsCompatibleOptions));
+        }
+
+        // ===== Ill-formed UTF-16 gate ================================
+        //
+        // System.Text.Json does not reject an unpaired surrogate in a string it
+        // is asked to serialize — it substitutes U+FFFD. Left alone, this SDK
+        // would therefore sign and hand back a body containing a value the
+        // caller never supplied, and the signature would attest to the
+        // substituted text. Reject instead of repairing: the caller's intent
+        // cannot be recovered once the surrogate is gone, and silently signing
+        // altered content is the one outcome that must not happen.
+        //
+        // The check runs on the INPUT strings, not on the serialized output.
+        // Scanning the output for U+FFFD cannot tell an encoder substitution
+        // apart from a U+FFFD the caller legitimately supplied without leaning
+        // on undocumented encoder details (measured: substitutions come out as
+        // a six-character "backslash-u-F-F-F-D" escape while a caller's literal
+        // U+FFFD is emitted raw — true today, but nothing contractual keeps it
+        // true, and a security check must not rest on that). Unpaired
+        // surrogates, by contrast, are decidable from the input alone via
+        // documented char.IsHighSurrogate / char.IsLowSurrogate semantics: a
+        // literal U+FFFD is not a surrogate and is never rejected, and
+        // astral-plane characters are well-formed pairs and are never rejected.
+        //
+        // MAINTENANCE: every caller-supplied string that reaches the wire needs
+        // a check here. When a DTO gains a string member, extend the matching
+        // ValidateWireStrings overload below.
+        //
+        // This is ENFORCED, not left to memory. The shipped library cannot
+        // reflect over the DTOs (IL2CPP/AOT), but the test assembly runs on
+        // net8.0 with full reflection, so
+        //   HttpTests.AllWireDtoStringFields_AreCoveredByIllFormedUtf16Validation
+        // walks every string / string[] member of every *RequestBody type,
+        // poisons each one in turn with an unpaired surrogate, and asserts the
+        // corresponding Stamp* call rejects it. A new field — or a whole new
+        // wire DTO — fails that test instead of silently bypassing this gate.
+
+        private static void RequireWellFormedUtf16(string value, string memberName, string parameterName)
+        {
+            if (value == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                if (char.IsHighSurrogate(c))
+                {
+                    if (i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
+                    {
+                        i++;
+                        continue;
+                    }
+                }
+                else if (!char.IsLowSurrogate(c))
+                {
+                    continue;
+                }
+
+                // The offending value is not echoed: these members are
+                // caller-controlled and may carry sensitive material.
+                throw new ArgumentException(
+                    "cannot sign a request containing ill-formed UTF-16: " + memberName
+                    + " has an unpaired surrogate at index " + i
+                    + ". System.Text.Json would replace it with U+FFFD, so the "
+                    + "signed body would not match the value supplied.",
+                    parameterName);
+            }
+        }
+
+        private static void ValidateWireStrings(InitImportPrivateKeyRequestBody body)
+        {
+            RequireWellFormedUtf16(body.OrganizationId, "organizationId", nameof(body));
+            RequireWellFormedUtf16(body.Type, "type", nameof(body));
+            RequireWellFormedUtf16(body.TimestampMs, "timestampMs", nameof(body));
+            if (body.Parameters != null)
+            {
+                RequireWellFormedUtf16(body.Parameters.UserId, "parameters.userId", nameof(body));
+            }
+        }
+
+        private static void ValidateWireStrings(ImportPrivateKeyRequestBody body)
+        {
+            RequireWellFormedUtf16(body.OrganizationId, "organizationId", nameof(body));
+            RequireWellFormedUtf16(body.Type, "type", nameof(body));
+            RequireWellFormedUtf16(body.TimestampMs, "timestampMs", nameof(body));
+            if (body.Parameters != null)
+            {
+                RequireWellFormedUtf16(body.Parameters.UserId, "parameters.userId", nameof(body));
+                RequireWellFormedUtf16(body.Parameters.Curve, "parameters.curve", nameof(body));
+                RequireWellFormedUtf16(
+                    body.Parameters.EncryptedBundle, "parameters.encryptedBundle", nameof(body));
+                RequireWellFormedUtf16(
+                    body.Parameters.PrivateKeyName, "parameters.privateKeyName", nameof(body));
+                if (body.Parameters.AddressFormats != null)
+                {
+                    for (int i = 0; i < body.Parameters.AddressFormats.Length; i++)
+                    {
+                        RequireWellFormedUtf16(
+                            body.Parameters.AddressFormats[i],
+                            "parameters.addressFormats[" + i + "]",
+                            nameof(body));
+                    }
+                }
+            }
+        }
+
+        private static void ValidateWireStrings(ExportPrivateKeyRequestBody body)
+        {
+            RequireWellFormedUtf16(body.OrganizationId, "organizationId", nameof(body));
+            RequireWellFormedUtf16(body.Type, "type", nameof(body));
+            RequireWellFormedUtf16(body.TimestampMs, "timestampMs", nameof(body));
+            if (body.Parameters != null)
+            {
+                RequireWellFormedUtf16(
+                    body.Parameters.PrivateKeyId, "parameters.privateKeyId", nameof(body));
+                RequireWellFormedUtf16(
+                    body.Parameters.TargetPublicKey, "parameters.targetPublicKey", nameof(body));
+            }
+        }
+
+        private static void ValidateWireStrings(ExportWalletAccountRequestBody body)
+        {
+            RequireWellFormedUtf16(body.OrganizationId, "organizationId", nameof(body));
+            RequireWellFormedUtf16(body.Type, "type", nameof(body));
+            RequireWellFormedUtf16(body.TimestampMs, "timestampMs", nameof(body));
+            if (body.Parameters != null)
+            {
+                RequireWellFormedUtf16(body.Parameters.Address, "parameters.address", nameof(body));
+                RequireWellFormedUtf16(
+                    body.Parameters.TargetPublicKey, "parameters.targetPublicKey", nameof(body));
+            }
         }
 
         private SignedRequest CreateSignedRequest(string url, string bodyJson)
