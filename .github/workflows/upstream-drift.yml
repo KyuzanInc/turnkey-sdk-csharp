@@ -39,21 +39,29 @@ jobs:
             repo: sdk
             git_tag_sha: b35dc642bd7c1728f97acd43d4cba66976b65084
             tarball_dir: packages/crypto
+            npm_package: "@turnkey/crypto"
+            npm_version: "2.8.8"
           - package: turnkey-http-3.16.0
             owner: tkhq
             repo: sdk
             git_tag_sha: 8def9ba521233137437ac7294693a4ae0a0d14da
             tarball_dir: packages/http
+            npm_package: "@turnkey/http"
+            npm_version: "3.16.0"
           - package: turnkey-api-key-stamper-0.5.0
             owner: tkhq
             repo: sdk
             git_tag_sha: b711befbb88ec522452dbdac68f0e98762be10dd
             tarball_dir: packages/api-key-stamper
+            npm_package: "@turnkey/api-key-stamper"
+            npm_version: "0.5.0"
           - package: turnkey-encoding-0.6.0
             owner: tkhq
             repo: sdk
             git_tag_sha: 60a997f4c52ac5f98bdd285af934f02699b88bff
             tarball_dir: packages/encoding
+            npm_package: "@turnkey/encoding"
+            npm_version: "0.6.0"
     steps:
       # actions/checkout v7.0.0 — see .github/pin-actions.txt
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
@@ -62,6 +70,76 @@ jobs:
 
       - name: Verify retained source manifest
         run: ./tools/compatibility/verify-source-checksums.sh
+
+      # docs/compatibility/upstream-pins.md calls the npm tarball SHA-256
+      # in tests/UpstreamSources/package-checksums.txt the compatibility
+      # authority, but nothing previously fetched the real npm registry to
+      # confirm those hashes still match what's published. This does not
+      # block PRs (this workflow never does — see the header comment); it
+      # surfaces as a drift issue via the same idempotent mechanism as the
+      # TypeScript source-drift check below.
+      #
+      # The registry's own `dist.integrity` is SHA-512 (SRI-encoded), not
+      # SHA-256, so it is not directly comparable to our recorded hash;
+      # this downloads the actual tarball and hashes it, which is exactly
+      # what the documented re-pinning procedure
+      # (docs/compatibility/upstream-pins.md, "Re-pinning procedure",
+      # step 1-2: `npm pack` + record the tarball SHA-256) already does by
+      # hand. This automates that same check periodically.
+      - name: Verify npm tarball SHA-256 against package-checksums.txt
+        id: tarball
+        env:
+          PACKAGE: ${{ matrix.package }}
+          NPM_PACKAGE: ${{ matrix.npm_package }}
+          NPM_VERSION: ${{ matrix.npm_version }}
+        run: |
+          set -euo pipefail
+
+          expected_sha=$(awk -v want="${PACKAGE}.tgz" \
+            '$2 == want { print $1; found=1 } END { exit found ? 0 : 1 }' \
+            tests/UpstreamSources/package-checksums.txt) \
+            || { echo "::error::${PACKAGE}.tgz not found in tests/UpstreamSources/package-checksums.txt" >&2; exit 1; }
+
+          registry_url="https://registry.npmjs.org/${NPM_PACKAGE}/${NPM_VERSION}"
+          metadata=$(mktemp)
+          http_status=$(curl --silent --show-error --location \
+            --output "$metadata" --write-out '%{http_code}' \
+            "$registry_url")
+          if [[ "$http_status" != "200" ]]; then
+            echo "::error::npm registry returned HTTP ${http_status} for ${registry_url}" >&2
+            exit 1
+          fi
+
+          tarball_url=$(jq -r '.dist.tarball // empty' "$metadata")
+          rm -f "$metadata"
+          if [[ -z "$tarball_url" ]]; then
+            echo "::error::npm registry metadata for ${registry_url} has no dist.tarball" >&2
+            exit 1
+          fi
+
+          tarball=$(mktemp)
+          curl --silent --show-error --location --fail --output "$tarball" "$tarball_url"
+          actual_sha=$(shasum -a 256 "$tarball" | awk '{print $1}')
+          rm -f "$tarball"
+
+          # A hash mismatch is DRIFT, not an infrastructure failure. Do not hard
+          # exit here: that would abort the job before the drift-report and
+          # issue-upsert steps, leaving only a failed Actions run and never the
+          # tracking issue this workflow promises. Record it as an output that
+          # the "Compute drift report" step folds into the same report/issue.
+          # Registry/transport failures above still exit non-zero, since those
+          # are not drift.
+          if [[ "$actual_sha" != "$expected_sha" ]]; then
+            echo "::warning::npm tarball SHA-256 mismatch for ${NPM_PACKAGE}@${NPM_VERSION}: expected ${expected_sha}, got ${actual_sha} (source: ${tarball_url})"
+            {
+              echo "TARBALL_DRIFT=1"
+              echo "TARBALL_EXPECTED=${expected_sha}"
+              echo "TARBALL_ACTUAL=${actual_sha}"
+              echo "TARBALL_SOURCE=${tarball_url}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "npm tarball SHA-256 verified for ${NPM_PACKAGE}@${NPM_VERSION}: ${actual_sha}"
+          fi
 
       # The pin file format is "<sha256>  <relpath>" where <relpath>
       # always starts with "tests/UpstreamSources/".
@@ -84,6 +162,14 @@ jobs:
           REPO: ${{ matrix.repo }}
           GIT_SHA: ${{ matrix.git_tag_sha }}
           TARBALL_DIR: ${{ matrix.tarball_dir }}
+          NPM_PACKAGE: ${{ matrix.npm_package }}
+          NPM_VERSION: ${{ matrix.npm_version }}
+          # Passed via env, never interpolated into the script body, so a
+          # registry-supplied value cannot inject shell.
+          TARBALL_DRIFT: ${{ steps.tarball.outputs.TARBALL_DRIFT }}
+          TARBALL_EXPECTED: ${{ steps.tarball.outputs.TARBALL_EXPECTED }}
+          TARBALL_ACTUAL: ${{ steps.tarball.outputs.TARBALL_ACTUAL }}
+          TARBALL_SOURCE: ${{ steps.tarball.outputs.TARBALL_SOURCE }}
         run: |
           set -euo pipefail
 
@@ -93,6 +179,20 @@ jobs:
 
           drift_count=0
           matched_count=0
+
+          # Fold a tarball-hash mismatch (recorded by the previous step) into the
+          # same report so it reaches the tracking issue rather than only a
+          # failed run. This is package-level drift, distinct from the per-file
+          # source drift computed below.
+          if [[ "${TARBALL_DRIFT:-0}" == "1" ]]; then
+            {
+              echo "- **TARBALL_DRIFT**: published npm tarball hash changed for \`${NPM_PACKAGE}@${NPM_VERSION}\`"
+              echo "  - expected sha256 \`${TARBALL_EXPECTED}\`"
+              echo "  - live sha256     \`${TARBALL_ACTUAL}\`"
+              echo "  - source          \`${TARBALL_SOURCE}\`"
+            } >> "$REPORT"
+            drift_count=$((drift_count + 1))
+          fi
 
           while IFS= read -r line; do
             # Skip comments and blank lines.
@@ -152,10 +252,10 @@ jobs:
 
             if [[ "$live_sha" != "$expected_sha" ]]; then
               {
-                echo "- **DRIFT**: \`${upstream_subpath}\``"
-                echo "  - expected sha256 \`${expected_sha}\``"
-                echo "  - live sha256     \`${live_sha}\``"
-                echo "  - live ref        \`${OWNER}/${REPO}@${GIT_SHA}\``"
+                echo "- **DRIFT**: \`${upstream_subpath}\`"
+                echo "  - expected sha256 \`${expected_sha}\`"
+                echo "  - live sha256     \`${live_sha}\`"
+                echo "  - live ref        \`${OWNER}/${REPO}@${GIT_SHA}\`"
               } >> "$REPORT"
               drift_count=$((drift_count + 1))
             fi

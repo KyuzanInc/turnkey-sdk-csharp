@@ -1,0 +1,33 @@
+# Code owners for turnkey-sdk-csharp.
+#
+# This file only ASSIGNS reviewers. It does not enforce anything on its own:
+# review by a code owner becomes mandatory only when branch protection on
+# `main` has `require_code_owner_reviews` enabled. That is a repository
+# setting and cannot be changed from a pull request. See CLAUDE.md, which
+# states that cryptography and wire-format changes require independent
+# maintainer review — this file is the mechanism that makes that routable.
+#
+# Owners must be able to resolve: GitHub silently ignores an unknown team or
+# user, which would leave the rule looking present but doing nothing.
+# `@KyuzanInc/peak-developers` is the team that currently holds push access
+# on this repository.
+
+# Default owner for everything not matched more specifically below.
+*                           @KyuzanInc/peak-developers
+
+# Cryptographic implementation and the signed wire format. Changes here are
+# the ones CLAUDE.md singles out for independent review.
+/src/                       @KyuzanInc/peak-developers
+
+# Compatibility and CI gate scripts. These are the controls that prove the
+# port still matches the pinned upstream, so a change here can weaken every
+# other guarantee in the repository.
+/tools/                     @KyuzanInc/peak-developers
+
+# Workflow definitions, action pins, and release automation.
+/.github/workflows/         @KyuzanInc/peak-developers
+/.github/pin-actions.txt    @KyuzanInc/peak-developers
+
+# Vendored upstream sources and their checksum manifests. These are SHA-256
+# pinned; a change here alters what "matches upstream" means.
+/tests/UpstreamSources/     @KyuzanInc/peak-developers

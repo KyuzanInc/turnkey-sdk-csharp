@@ -31,13 +31,8 @@ actions/upload-artifact
   pinned_tag:     v7.0.1
   used_in:        ci.yml
 
-irongut/CodeCoverageSummary
-  pinned_sha:     51cc3a756ddcd398d447c044c02cb6aa83fdae95
-  pinned_tag:     v1.3.0
-  used_in:        ci.yml
-
 release-drafter/release-drafter
-  pinned_sha:     da8b9b696abad2ad997580e49f4c1c2e03cc2bd2
+  pinned_sha:     c2e2804cc59f45f57076a99af580d0fedb697927
   pinned_tag:     v7.3.0
   used_in:        release-drafter-draft.yml (root action)
                   release-drafter-autolabel.yml (autolabeler subpath)
@@ -46,7 +41,7 @@ release-drafter/release-drafter
     autolabeler (per PLAN-RELEASE-WORKFLOW.md acceptance):
       src/actions/autolabeler/main.ts:70
       "if (matcher.test(payload.pull_request.title)) {"
-      https://github.com/release-drafter/release-drafter/blob/da8b9b696abad2ad997580e49f4c1c2e03cc2bd2/src/actions/autolabeler/main.ts#L70
+      https://github.com/release-drafter/release-drafter/blob/c2e2804cc59f45f57076a99af580d0fedb697927/src/actions/autolabeler/main.ts#L70
     Above that, the early-exit at main.ts:17-22 only filters
     `context.eventName !== 'pull_request' && !== 'pull_request_target'`.
     It does NOT filter on `context.payload.action`, so any

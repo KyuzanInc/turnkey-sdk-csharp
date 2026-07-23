@@ -214,20 +214,8 @@ namespace Turnkey.Tests
             }
         }
 
-        [Fact]
-        public void CompressRawPublicKey_Permissive_OnAnyLength()
-        {
-            // Upstream behavior: slice + LSB-flip regardless of input shape.
-            // For a 65-byte uncompressed key we produce a 33-byte compressed key.
-            // For other lengths we produce a different-length output that
-            // upstream would also produce. Confirm we no longer throw on
-            // malformed input.
-            var raw = new byte[64];
-            raw[0] = 0x04;
-            raw[63] = 0x01;
-            Action act = () => Crypto.CompressRawPublicKey(raw);
-            act.Should().NotThrow();
-        }
+        // Both CompressRawPublicKey validation tests now live together in the
+        // "ITEM 2 BLOCK" region near the end of this file.
 
         /// upstream: tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts:241 "uncompressRawPublicKey invalid prefix"
         /// upstream: tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/__tests__/elliptic-curves-test.ts:8 "pointDecode -> uncompressed invalid"
@@ -572,12 +560,9 @@ namespace Turnkey.Tests
                .WithMessage("failed to uncompress raw public key: invalid prefix");
         }
 
-        [Fact]
-        public void CompressRawPublicKey_EmptyInput_ReturnsEmpty()
-        {
-            // Upstream behavior: empty Uint8Array slice produces empty result.
-            Crypto.CompressRawPublicKey(Array.Empty<byte>()).Should().BeEmpty();
-        }
+        // CompressRawPublicKey_EmptyInput_Throws (formerly
+        // CompressRawPublicKey_EmptyInput_ReturnsEmpty) moved to the
+        // "ITEM 2 BLOCK" region near the end of this file.
 
         [Fact]
         public void HpkeEncrypt_NullPlainTextBuf_Throws()
@@ -695,8 +680,705 @@ namespace Turnkey.Tests
         }
 
         // ============================================================
+        // ITEM 2 BLOCK — CompressRawPublicKey input validation (SHIPPING).
+        // Delete this whole region if item 2 is reverted.
+        //
+        // CompressRawPublicKey_WrongLength_Throws replaces the former
+        // CompressRawPublicKey_Permissive_OnAnyLength, and
+        // CompressRawPublicKey_EmptyInput_Throws replaces the former
+        // CompressRawPublicKey_EmptyInput_ReturnsEmpty. Both originals asserted
+        // the permissive upstream slice arithmetic, which silently returns a
+        // truncated 32-byte buffer for a bare X||Y key — they documented the
+        // defect rather than a required behavior, and neither is referenced by
+        // tools/compatibility/coverage-map.tsv nor carries an upstream
+        // citation. The single upstream compressRawPublicKey test
+        // (crypto-test.ts:172) maps to CompressUncompress_Roundtrip_RandomKeys,
+        // which is untouched, so no upstream parity coverage is lost.
+        // ============================================================
+
+        [Theory]
+        [InlineData(0)]   // empty
+        [InlineData(1)]
+        [InlineData(33)]  // compressed key handed in by mistake
+        [InlineData(64)]  // bare X||Y with the 0x04 prefix stripped
+        [InlineData(66)]
+        public void CompressRawPublicKey_WrongLength_Throws(int length)
+        {
+            var raw = new byte[length];
+            if (length > 0)
+            {
+                raw[0] = 0x04;
+            }
+            Action act = () => Crypto.CompressRawPublicKey(raw);
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("failed to compress raw public key: expected 65 bytes, got " + length + "*");
+        }
+
+        [Fact]
+        public void CompressRawPublicKey_EmptyInput_Throws()
+        {
+            // An empty "compressed public key" is never a usable result.
+            Action act = () => Crypto.CompressRawPublicKey(Array.Empty<byte>());
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("failed to compress raw public key: expected 65 bytes, got 0*");
+        }
+
+        [Fact]
+        public void CompressRawPublicKey_WrongPrefix_Throws()
+        {
+            var raw = new byte[65];
+            raw[0] = 0x03; // compressed-point prefix on a 65-byte buffer
+            Action act = () => Crypto.CompressRawPublicKey(raw);
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("failed to compress raw public key: expected SEC1 prefix 0x04*");
+        }
+
+        [Fact]
+        public void CompressRawPublicKey_ValidKey_ByteIdenticalToLegacySlice()
+        {
+            // Wire-safety proof: for a well-formed 65-byte SEC1 key the output
+            // must still equal the upstream slice+LSB-flip result exactly.
+            for (int i = 0; i < 8; i++)
+            {
+                var kp = Crypto.GenerateP256KeyPair();
+                byte[] uncompressed = Encoding.Uint8ArrayFromHexString(kp.PublicKeyUncompressed);
+
+                var legacy = new byte[33];
+                Array.Copy(uncompressed, 0, legacy, 0, 33);
+                legacy[0] = (byte)(0x02 | (uncompressed[64] & 0x01));
+
+                Crypto.CompressRawPublicKey(uncompressed).Should().Equal(legacy);
+            }
+        }
+
+        // ============================================================
+        // END ITEM 2 BLOCK
+        // ============================================================
+
+        // ============================================================
+        // Audit remediation — base64url hardening in JWT verification
+        // ============================================================
+
+        // The pinned production vector from
+        // VerifySessionJwtSignature_UpstreamVector_ReturnsTrue, split so the
+        // signature segment can be mutated.
+        private const string PinnedJwtSigningInput =
+            "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9."
+            + "eyJleHAiOjE3NDg4NzY4MzcsInB1YmxpY19rZXkiOiIwMzk5ZmUyYWNlNjIwOGFmMGFkZjg0OGY0NGJjNDgyMTBiNTk0YjdlNjllY2Q5MWVjOTY4ZmQ3NWIzYmI0NDgzMzYiLCJzZXNzaW9uX3R5cGUiOiJTRVNTSU9OX1RZUEVfUkVBRF9XUklURSIsInVzZXJfaWQiOiI2OTEyYjgxOS1mNGRmLTQwZjQtYTE5Mi0yMGVlNDMwOTA5NzQiLCJvcmdhbml6YXRpb25faWQiOiJjNzVlY2IwNy1jODRhLTRkZDUtOTMyYy01MzlkZmFmYzY4NjQifQ";
+
+        private const string PinnedJwtSignature =
+            "y6LPW1jlTwc9jFcvCwKJoKfleL_vHnGUr5tRVdMFUCnHvDspSPZ3DWK85tf1znCCBFQ6MYaFOl-1FLb0KcFxqQ";
+
+        [Fact]
+        public void VerifySessionJwtSignature_PinnedVector_StillVerifies()
+        {
+            // Correctness anchor for the base64url hardening: the canonical
+            // production signature must keep verifying.
+            Crypto.VerifySessionJwtSignature(PinnedJwtSigningInput + "." + PinnedJwtSignature)
+                  .Should().BeTrue();
+        }
+
+        [Fact]
+        public void VerifySessionJwtSignature_NonCanonicalFinalCharacter_ReturnsFalse()
+        {
+            // A 64-byte signature ends on a 2-bit base64 group, so 16 different
+            // final characters ('Q'..'Z', 'a'..'f') decode to the same bytes.
+            // Exactly one of them — the canonical 'Q' — may be accepted;
+            // the other 15 are signature malleability.
+            const string alternatives = "QRSTUVWXYZabcdef";
+            string prefix = PinnedJwtSignature.Substring(0, PinnedJwtSignature.Length - 1);
+            PinnedJwtSignature[PinnedJwtSignature.Length - 1].Should().Be('Q');
+
+            foreach (char c in alternatives)
+            {
+                string jwt = PinnedJwtSigningInput + "." + prefix + c;
+                bool expected = c == 'Q';
+                Crypto.VerifySessionJwtSignature(jwt).Should().Be(
+                    expected, $"final base64url character '{c}' canonical={expected}");
+            }
+        }
+
+        [Fact]
+        public void VerifySessionJwtSignature_StandardBase64Spelling_ReturnsFalse()
+        {
+            // '+' and '/' are not in the base64url alphabet. Accepting them
+            // gives a second wire spelling for the same signature.
+            string standard = PinnedJwtSignature.Replace('-', '+').Replace('_', '/');
+            standard.Should().NotBe(PinnedJwtSignature);
+
+            Crypto.VerifySessionJwtSignature(PinnedJwtSigningInput + "." + standard)
+                  .Should().BeFalse();
+        }
+
+        [Fact]
+        public void VerifySessionJwtSignature_PaddedSignature_ReturnsFalse()
+        {
+            // '=' padding is not part of the JWS compact serialization.
+            Crypto.VerifySessionJwtSignature(PinnedJwtSigningInput + "." + PinnedJwtSignature + "=")
+                  .Should().BeFalse();
+        }
+
+        [Fact]
+        public void VerifySessionJwtSignature_MalformedSignatureSegment_ReturnsFalseNotThrows()
+        {
+            // Previously Convert.FromBase64String leaked an undeclared
+            // FormatException out of a bool-returning verify method.
+            foreach (string bad in new[] { "!!!!", "a", "abcde", "ab cd", "é" })
+            {
+                Action act = () => Crypto.VerifySessionJwtSignature(
+                    PinnedJwtSigningInput + "." + bad);
+                act.Should().NotThrow($"signature segment {bad} must not throw");
+                Crypto.VerifySessionJwtSignature(PinnedJwtSigningInput + "." + bad)
+                      .Should().BeFalse();
+            }
+        }
+
+        // ============================================================
+        // Audit remediation — SessionJwt.Validate
+        // ============================================================
+
+        [Fact]
+        public void SessionJwtValidate_PinnedProductionVector_IsRejectedAsExpired()
+        {
+            // The pinned vector's signature verifies (see
+            // VerifySessionJwtSignature_UpstreamVector_ReturnsTrue) but its
+            // exp is 2025-06-02. VerifySessionJwtSignature accepts it forever;
+            // Validate must not.
+            string jwt = PinnedJwtSigningInput + "." + PinnedJwtSignature;
+            Crypto.VerifySessionJwtSignature(jwt).Should().BeTrue();
+
+            Action act = () => Crypto.SessionJwt.Validate(jwt);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("JWT expired: exp is 1748876837*");
+        }
+
+        [Fact]
+        public void SessionJwtValidate_PinnedProductionVector_ReturnsClaimsWithinSkew()
+        {
+            // Same pinned vector, with enough skew to cover its expiry: the
+            // claims must come back parsed.
+            string jwt = PinnedJwtSigningInput + "." + PinnedJwtSignature;
+
+            var claims = Crypto.SessionJwt.Validate(jwt, TimeSpan.FromDays(36500));
+
+            claims.OrganizationId.Should().Be("c75ecb07-c84a-4dd5-932c-539dfafc6864");
+            claims.UserId.Should().Be("6912b819-f4df-40f4-a192-20ee43090974");
+            claims.SessionType.Should().Be("SESSION_TYPE_READ_WRITE");
+            claims.PublicKey.Should().Be(
+                "0399fe2ace6208af0adf848f44bc48210b594b7e69ecd91ec968fd75b3bb448336");
+            claims.ExpiresAt.ToUnixTimeSeconds().Should().Be(1748876837);
+            claims.NotBefore.Should().BeNull();
+            claims.PayloadJson.Should().StartWith("{\"exp\":1748876837");
+        }
+
+        [Fact]
+        public void SessionJwtValidate_ExtraSegment_Throws()
+        {
+            // VerifySessionJwtSignature keeps upstream's `parts.length < 3`, so
+            // it accepts a fourth segment against the same signature. Validate
+            // requires exactly three.
+            string tampered = PinnedJwtSigningInput + "." + PinnedJwtSignature + ".extra";
+            Crypto.VerifySessionJwtSignature(tampered).Should().BeTrue(
+                "upstream parity: VerifySessionJwtSignature ignores trailing segments");
+
+            Action act = () => Crypto.SessionJwt.Validate(tampered, TimeSpan.FromDays(36500));
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: expected exactly 3 segments, got 4");
+        }
+
+        [Theory]
+        [InlineData("only.two")]
+        [InlineData("")]
+        [InlineData("a.b.c.d.e")]
+        public void SessionJwtValidate_WrongSegmentCount_Throws(string jwt)
+        {
+            Action act = () => Crypto.SessionJwt.Validate(jwt);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: expected exactly 3 segments*");
+        }
+
+        [Fact]
+        public void SessionJwtValidate_ForgedSignature_Throws()
+        {
+            var notarizer = new TestP256Signer();
+            string jwt = notarizer.MintJwt("{\"exp\":" + FutureUnix() + "}");
+
+            // Correct key validates; the production key must reject it.
+            Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex).Should().NotBeNull();
+
+            Action act = () => Crypto.SessionJwt.Validate(jwt);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: signature verification failed");
+        }
+
+        [Fact]
+        public void SessionJwtValidate_NotYetValid_Throws()
+        {
+            var notarizer = new TestP256Signer();
+            long nbf = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds();
+            string jwt = notarizer.MintJwt(
+                "{\"nbf\":" + nbf + ",\"exp\":" + FutureUnix() + "}");
+
+            Action act = () => Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("JWT is not yet valid: nbf is " + nbf + "*");
+        }
+
+        [Fact]
+        public void SessionJwtValidate_NotYetValid_AcceptedWithinClockSkew()
+        {
+            var notarizer = new TestP256Signer();
+            long nbf = DateTimeOffset.UtcNow.AddMinutes(2).ToUnixTimeSeconds();
+            string jwt = notarizer.MintJwt(
+                "{\"nbf\":" + nbf + ",\"exp\":" + FutureUnix() + "}");
+
+            var claims = Crypto.SessionJwt.Validate(
+                jwt, TimeSpan.FromMinutes(10), notarizer.PublicKeyHex);
+            claims.NotBefore!.Value.ToUnixTimeSeconds().Should().Be(nbf);
+        }
+
+        [Fact]
+        public void SessionJwtValidate_MissingExp_Throws()
+        {
+            var notarizer = new TestP256Signer();
+            string jwt = notarizer.MintJwt("{\"user_id\":\"u1\"}");
+
+            Action act = () => Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: missing or non-numeric \"exp\" claim");
+        }
+
+        [Fact]
+        public void SessionJwtValidate_NegativeClockSkew_Throws()
+        {
+            Action act = () => Crypto.SessionJwt.Validate("a.b.c", TimeSpan.FromSeconds(-1));
+            act.Should().Throw<ArgumentOutOfRangeException>();
+        }
+
+        [Fact]
+        public void SessionJwtValidate_IatIsExposed()
+        {
+            var notarizer = new TestP256Signer();
+            long iat = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds();
+            string jwt = notarizer.MintJwt(
+                "{\"iat\":" + iat + ",\"exp\":" + FutureUnix() + "}");
+
+            var claims = Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            claims.IssuedAt!.Value.ToUnixTimeSeconds().Should().Be(iat);
+        }
+
+        // A present-but-malformed nbf must be rejected, not silently treated as
+        // absent: otherwise a correctly signed token with a garbage not-before
+        // would bypass the enforcement Validate advertises. "Malformed" means
+        // not a JSON number (RFC 7519 permits fractional NumericDate values, so
+        // a fractional number is NOT malformed — see the accepted case below).
+        [Theory]
+        [InlineData("\"nbf\":\"1700000000\"")]   // string, not a number
+        [InlineData("\"nbf\":true")]             // wrong JSON type
+        [InlineData("\"nbf\":99999999999999999")] // out of DateTimeOffset range
+        public void SessionJwtValidate_MalformedNbf_IsRejected(string nbfMember)
+        {
+            var notarizer = new TestP256Signer();
+            string jwt = notarizer.MintJwt("{" + nbfMember + ",\"exp\":" + FutureUnix() + "}");
+
+            Action act = () => Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: \"nbf\" claim is present but not a valid NumericDate");
+        }
+
+        [Fact]
+        public void SessionJwtValidate_AbsentNbf_RemainsOptional()
+        {
+            var notarizer = new TestP256Signer();
+            string jwt = notarizer.MintJwt("{\"exp\":" + FutureUnix() + "}");
+
+            var claims = Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            claims.NotBefore.Should().BeNull();
+        }
+
+        // RFC 7519 §2 explicitly permits non-integer NumericDate values, so a
+        // fractional exp/nbf/iat is a valid claim and must be honored, not
+        // rejected. The fractional second is preserved.
+        [Fact]
+        public void SessionJwtValidate_FractionalNumericDates_AreAccepted()
+        {
+            var notarizer = new TestP256Signer();
+            long nbfWhole = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds();
+            long iatWhole = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds();
+            long expWhole = FutureUnix();
+            string jwt = notarizer.MintJwt(
+                "{\"nbf\":" + nbfWhole + ".25,\"iat\":" + iatWhole
+                + ".5,\"exp\":" + expWhole + ".75}");
+
+            var claims = Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+
+            claims.NotBefore!.Value.Should().Be(
+                DateTimeOffset.UnixEpoch.AddSeconds(nbfWhole + 0.25));
+            claims.IssuedAt!.Value.Should().Be(
+                DateTimeOffset.UnixEpoch.AddSeconds(iatWhole + 0.5));
+            claims.ExpiresAt.Should().Be(
+                DateTimeOffset.UnixEpoch.AddSeconds(expWhole + 0.75));
+        }
+
+        [Theory]
+        [InlineData("\"iat\":\"1700000000\"")]
+        [InlineData("\"iat\":false")]
+        public void SessionJwtValidate_MalformedIat_IsRejected(string iatMember)
+        {
+            var notarizer = new TestP256Signer();
+            string jwt = notarizer.MintJwt("{" + iatMember + ",\"exp\":" + FutureUnix() + "}");
+
+            Action act = () => Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: \"iat\" claim is present but not a valid NumericDate");
+        }
+
+        [Fact]
+        public void SessionJwtValidate_MalformedExp_IsRejected()
+        {
+            var notarizer = new TestP256Signer();
+            string jwt = notarizer.MintJwt("{\"exp\":\"not-a-number\"}");
+
+            Action act = () => Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: missing or non-numeric \"exp\" claim");
+        }
+
+        // ============================================================
+        // Audit remediation — DecryptCredentialBundle input bound
+        // ============================================================
+
+        [Fact]
+        public void DecryptCredentialBundle_OverlongInput_ThrowsBeforeDecoding()
+        {
+            // Base58 decode is O(n^2), runs on unauthenticated input, and runs
+            // before any checksum/HPKE step can reject the bundle.
+            string overlong = new string('1', 1025);
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            Action act = () => Crypto.DecryptCredentialBundle(overlong, new string('1', 64));
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("encrypted credential bundle is too long: 1025 characters*");
+            stopwatch.Stop();
+
+            // The guard must short-circuit, not merely bound the work.
+            stopwatch.ElapsedMilliseconds.Should().BeLessThan(1000);
+        }
+
+        [Fact]
+        public void DecryptCredentialBundle_AtLengthLimit_ProceedsToDecode()
+        {
+            // Exactly at the bound the input is still processed (and then
+            // rejected on its merits, not its length).
+            string atLimit = new string('1', 1024);
+            Action act = () => Crypto.DecryptCredentialBundle(atLimit, new string('1', 64));
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("*Error decrypting bundle*");
+        }
+
+        // ============================================================
+        // Audit remediation — DecodeKey diagnostic parity
+        // ============================================================
+
+        [Fact]
+        public void DecodeKey_UnknownKeyFormat_RaisesDiagnosticWarning()
+        {
+            // Upstream turnkey.ts:299-302 emits console.warn before falling
+            // back to hex. This port dropped it entirely.
+            var warnings = new System.Collections.Generic.List<string>();
+            var previous = Crypto.Diagnostics.OnWarning;
+            Crypto.Diagnostics.OnWarning = warnings.Add;
+            try
+            {
+                // DecodeKey runs before signature verification, so an invalid
+                // bundle still exercises it.
+                Action act = () => Crypto.EncryptPrivateKeyToBundle(
+                    new Crypto.EncryptPrivateKeyToBundleParams
+                    {
+                        ImportBundle = "{}",
+                        PrivateKey = "00112233",
+                        KeyFormat = "NOT_A_REAL_FORMAT",
+                    });
+                act.Should().Throw<Exception>();
+            }
+            finally
+            {
+                Crypto.Diagnostics.OnWarning = previous;
+            }
+
+            warnings.Should().ContainSingle().Which.Should().Be(
+                "invalid key format: NOT_A_REAL_FORMAT. Defaulting to HEXADECIMAL.");
+        }
+
+        [Fact]
+        public void DecodeKey_NullKeyFormat_WarnsLikeUpstreamUndefined()
+        {
+            var warnings = new System.Collections.Generic.List<string>();
+            var previous = Crypto.Diagnostics.OnWarning;
+            Crypto.Diagnostics.OnWarning = warnings.Add;
+            try
+            {
+                Action act = () => Crypto.EncryptPrivateKeyToBundle(
+                    new Crypto.EncryptPrivateKeyToBundleParams
+                    {
+                        ImportBundle = "{}",
+                        PrivateKey = "00112233",
+                        KeyFormat = null,
+                    });
+                act.Should().Throw<Exception>();
+            }
+            finally
+            {
+                Crypto.Diagnostics.OnWarning = previous;
+            }
+
+            warnings.Should().ContainSingle().Which.Should().Be(
+                "invalid key format: undefined. Defaulting to HEXADECIMAL.");
+        }
+
+        [Theory]
+        [InlineData("HEXADECIMAL")]
+        [InlineData("SOLANA")]
+        public void DecodeKey_RecognizedKeyFormat_DoesNotWarn(string keyFormat)
+        {
+            var warnings = new System.Collections.Generic.List<string>();
+            var previous = Crypto.Diagnostics.OnWarning;
+            Crypto.Diagnostics.OnWarning = warnings.Add;
+            try
+            {
+                Action act = () => Crypto.EncryptPrivateKeyToBundle(
+                    new Crypto.EncryptPrivateKeyToBundleParams
+                    {
+                        ImportBundle = "{}",
+                        PrivateKey = Encoding.Base58Encode(new byte[64]),
+                        KeyFormat = keyFormat,
+                    });
+                act.Should().Throw<Exception>();
+            }
+            finally
+            {
+                Crypto.Diagnostics.OnWarning = previous;
+            }
+
+            warnings.Should().BeEmpty();
+        }
+
+        // ============================================================
+        // Audit remediation — non-ASCII (Japanese) BIP-39 mnemonic export
+        // ============================================================
+
+        [Fact]
+        public void DecryptExportBundle_JapaneseMnemonic_RoundTripsAsUtf8()
+        {
+            // Encoding.HexToAscii widens each byte to a char, so every 3-byte
+            // UTF-8 Japanese character came back as 3 mojibake characters.
+            const string japaneseMnemonic =
+                "そつう れきだい ほんやく わかす りくつ ばいか ろせん やちん そんちょう "
+                + "たんまつ せんせい つとめる";
+
+            RoundTripExportedMnemonic(japaneseMnemonic).Should().Be(japaneseMnemonic);
+        }
+
+        [Fact]
+        public void DecryptExportBundle_EnglishMnemonic_StillByteIdentical()
+        {
+            // Regression guard for the same change: ASCII must be unaffected.
+            const string englishMnemonic =
+                "leaf lady until indicate praise final route toast cake minimum insect unknown";
+
+            RoundTripExportedMnemonic(englishMnemonic).Should().Be(englishMnemonic);
+        }
+
+        [Theory]
+        [InlineData("차가운 자연 손목 항상 발달 남편 다행 장면 사흘 도시 물음 마음")] // Korean
+        [InlineData("的 一 是 在 不 了 有 和 人 这 中 大")]                              // Chinese
+        [InlineData("abandon ability able about above absent absorb abstract absurd abuse access accident")]
+        public void DecryptExportBundle_NonAsciiWordlists_RoundTrip(string mnemonic)
+        {
+            RoundTripExportedMnemonic(mnemonic).Should().Be(mnemonic);
+        }
+
+        // ============================================================
+        // Audit remediation — exception filters
+        // ============================================================
+
+        [Fact]
+        public void HpkeDecrypt_MalformedReceiverPrivHex_SurfacesArgumentException()
+        {
+            // Malformed key material used to be relabelled as
+            // "Unable to perform hpkeDecrypt: ...".
+            var recv = Crypto.GenerateP256KeyPair();
+            byte[] encapped = Encoding.Uint8ArrayFromHexString(recv.PublicKeyUncompressed);
+
+            Action act = () => Crypto.HpkeDecrypt(new Crypto.HpkeDecryptParams
+            {
+                CiphertextBuf = new byte[16],
+                EncappedKeyBuf = encapped,
+                ReceiverPriv = "not-hex",
+            });
+            act.Should().Throw<ArgumentException>()
+               .And.Should().NotBeOfType<InvalidOperationException>();
+        }
+
+        [Fact]
+        public void HpkeEncrypt_MalformedTargetKey_SurfacesArgumentException()
+        {
+            Action act = () => Crypto.HpkeEncrypt(new Crypto.HpkeEncryptParams
+            {
+                PlainTextBuf = new byte[4],
+                TargetKeyBuf = new byte[65], // 65 bytes, but not a curve point
+            });
+            act.Should().Throw<ArgumentException>();
+        }
+
+        [Fact]
+        public void HpkeDecrypt_NullParameter_ThrowsArgumentNullExceptionUnwrapped()
+        {
+            // Null-argument validation now runs outside the try block.
+            Action act = () => Crypto.HpkeDecrypt(new Crypto.HpkeDecryptParams
+            {
+                CiphertextBuf = null,
+                EncappedKeyBuf = new byte[65],
+                ReceiverPriv = "00",
+            });
+            act.Should().Throw<ArgumentNullException>();
+        }
+
+        // ============================================================
         // Helpers
         // ============================================================
+
+        private static long FutureUnix()
+        {
+            return DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds();
+        }
+
+        /// <summary>
+        /// Builds a signed export bundle carrying <paramref name="mnemonic"/>
+        /// and runs it back through <see cref="Crypto.DecryptExportBundle"/>
+        /// with <c>ReturnMnemonic = true</c>.
+        /// </summary>
+        private static string RoundTripExportedMnemonic(string mnemonic)
+        {
+            const string organizationId = "f9a31c64-d604-42e4-9bef-a773096afad7";
+
+            var receiver = Crypto.GenerateP256KeyPair();
+            byte[] receiverPub = Encoding.Uint8ArrayFromHexString(receiver.PublicKeyUncompressed);
+
+            byte[] encrypted = Crypto.HpkeEncrypt(new Crypto.HpkeEncryptParams
+            {
+                PlainTextBuf = System.Text.Encoding.UTF8.GetBytes(mnemonic),
+                TargetKeyBuf = receiverPub,
+            });
+
+            var compressedSender = new byte[33];
+            Array.Copy(encrypted, 0, compressedSender, 0, 33);
+            var ciphertext = new byte[encrypted.Length - 33];
+            Array.Copy(encrypted, 33, ciphertext, 0, ciphertext.Length);
+
+            string signedJson =
+                "{\"encappedPublic\":\""
+                + Encoding.Uint8ArrayToHexString(Crypto.UncompressRawPublicKey(compressedSender))
+                + "\",\"ciphertext\":\"" + Encoding.Uint8ArrayToHexString(ciphertext)
+                + "\",\"organizationId\":\"" + organizationId + "\"}";
+
+            var signer = new TestP256Signer();
+            byte[] signedBytes = System.Text.Encoding.UTF8.GetBytes(signedJson);
+            string bundle =
+                "{\"version\":\"v1.0.0\",\"data\":\""
+                + Encoding.Uint8ArrayToHexString(signedBytes)
+                + "\",\"dataSignature\":\"" + signer.SignDerHex(signedBytes)
+                + "\",\"enclaveQuorumPublic\":\"" + signer.PublicKeyHex + "\"}";
+
+#pragma warning disable 618 // deliberate test-only trust-anchor override
+            return Crypto.DecryptExportBundle(new Crypto.DecryptExportBundleParams
+            {
+                ExportBundle = bundle,
+                EmbeddedKey = receiver.PrivateKey,
+                OrganizationId = organizationId,
+                KeyFormat = "HEXADECIMAL",
+                ReturnMnemonic = true,
+                DangerouslyOverrideSignerPublicKey = signer.PublicKeyHex,
+            });
+#pragma warning restore 618
+        }
+
+        /// <summary>
+        /// Throwaway P-256 key pair that can stand in for the Turnkey notarizer
+        /// or enclave signer, so signature-gated paths are reachable without a
+        /// production private key.
+        /// </summary>
+        private sealed class TestP256Signer
+        {
+            private readonly Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters _priv;
+
+            public string PublicKeyHex { get; }
+
+            public TestP256Signer()
+            {
+                var curve = Org.BouncyCastle.Asn1.X9.ECNamedCurveTable.GetByName(
+                    CryptoConstants.CURVE_NAME);
+                var domain = new Org.BouncyCastle.Crypto.Parameters.ECDomainParameters(
+                    curve.Curve, curve.G, curve.N, curve.H, curve.GetSeed());
+
+                var generator = new Org.BouncyCastle.Crypto.Generators.ECKeyPairGenerator();
+                generator.Init(new Org.BouncyCastle.Crypto.Parameters.ECKeyGenerationParameters(
+                    domain, new Org.BouncyCastle.Security.SecureRandom()));
+
+                var pair = generator.GenerateKeyPair();
+                _priv = (Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters)pair.Private;
+                var pub = (Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters)pair.Public;
+                PublicKeyHex = Encoding.Uint8ArrayToHexString(pub.Q.GetEncoded(false));
+            }
+
+            /// <summary>DER ECDSA-SHA256 signature over <paramref name="message"/>, hex encoded.</summary>
+            public string SignDerHex(byte[] message)
+            {
+                var signer = Org.BouncyCastle.Security.SignerUtilities.GetSigner("SHA-256withECDSA");
+                signer.Init(true, _priv);
+                signer.BlockUpdate(message, 0, message.Length);
+                return Encoding.Uint8ArrayToHexString(signer.GenerateSignature());
+            }
+
+            /// <summary>
+            /// Mints a session JWT over <paramref name="payloadJson"/> using the
+            /// same double-SHA-256 + raw r||s scheme
+            /// <see cref="Crypto.VerifySessionJwtSignature"/> expects.
+            /// </summary>
+            public string MintJwt(string payloadJson)
+            {
+                string header = Encoding.Base64StringToBase64UrlEncodedString(
+                    Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+                        "{\"alg\":\"ES256\",\"typ\":\"JWT\"}")));
+                string payload = Encoding.Base64StringToBase64UrlEncodedString(
+                    Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payloadJson)));
+                string signingInput = header + "." + payload;
+
+                byte[] digest;
+                using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                {
+                    digest = sha256.ComputeHash(
+                        sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(signingInput)));
+                }
+
+                var ecdsa = new Org.BouncyCastle.Crypto.Signers.ECDsaSigner();
+                ecdsa.Init(true, new Org.BouncyCastle.Crypto.Parameters.ParametersWithRandom(
+                    _priv, new Org.BouncyCastle.Security.SecureRandom()));
+                var rs = ecdsa.GenerateSignature(digest);
+
+                var raw = new byte[64];
+                Array.Copy(
+                    Org.BouncyCastle.Utilities.BigIntegers.AsUnsignedByteArray(32, rs[0]),
+                    0, raw, 0, 32);
+                Array.Copy(
+                    Org.BouncyCastle.Utilities.BigIntegers.AsUnsignedByteArray(32, rs[1]),
+                    0, raw, 32, 32);
+
+                string signature = Encoding.Base64StringToBase64UrlEncodedString(
+                    Convert.ToBase64String(raw));
+                return signingInput + "." + signature;
+            }
+        }
 
         private static byte[] HexToBytes(string hex)
         {

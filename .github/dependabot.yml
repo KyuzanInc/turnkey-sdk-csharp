@@ -17,6 +17,15 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # FluentAssertions 8.x moved to a commercial Xceed license
+      # (<license type="file">, projectUrl: xceed.com); 6.x and 7.x remain
+      # Apache-2.0. This repo declares "MIT AND Apache-2.0", so only the 8.x+
+      # range is blocked — the still-Apache-2.0 6.x -> 7.x upgrade stays
+      # available. Ignoring all major bumps would also suppress 7.x.
+      - dependency-name: "FluentAssertions"
+        versions:
+          - ">= 8.0.0"
 
   - package-ecosystem: github-actions
     directory: /

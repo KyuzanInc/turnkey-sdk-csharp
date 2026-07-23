@@ -84,6 +84,19 @@ done < <(find "$UPSTREAM_DIR" -type f \
             \( -name '*-test.ts' -o -name '*-tests.ts' \) \
             -path '*/__tests__/*' | sort)
 
+# Guard against an empty match set. Without this, "${UPSTREAM_FILES[@]}"
+# below is an empty-array expansion: under bash >=4.4 the for loop just
+# runs zero times (silently producing an empty TMP_UPSTREAM, which the
+# --check row-count floor below now also catches), but under bash 3.2
+# (macOS's default /bin/bash) it is an unbound-variable error under
+# `set -u` — and because that error fires with $? already reset to 0,
+# the `... || true` EXIT trap reports the whole script as exit 0 despite
+# never generating a coverage map. Fail loudly and explicitly instead.
+if (( ${#UPSTREAM_FILES[@]} == 0 )); then
+  echo "ERROR: no upstream test files found under $UPSTREAM_DIR (path or glob pattern changed?)." >&2
+  exit 1
+fi
+
 for f in "${UPSTREAM_FILES[@]}"; do
   rel="${f#$REPO_ROOT/}"
   awk -v rel="$rel" '
@@ -111,6 +124,15 @@ for f in "${UPSTREAM_FILES[@]}"; do
     # match "test.each([" / "it.each([" — record the line; the template comes
     # on a later line and looks like:  ])("template", …)
     /^[[:space:]]*(test|it)\.each[[:space:]]*\([[:space:]]*\[/ {
+      # A same-line closer ("])(" further in this same line) means the
+      # whole test.each(...)(...) is written on one line. That form is
+      # not parsed below (which expects the closer on its own line) and
+      # would otherwise be silently dropped while also desyncing in_each
+      # for the rest of the file. Fail closed instead.
+      if ($0 ~ /\]\)[[:space:]]*\(/) {
+        printf("UNRECOGNIZED upstream test form at %s:%d (single-line test.each): %s\n", rel, NR, $0) > "/dev/stderr"
+        exit 1
+      }
       in_each=1; each_line=NR; next
     }
     in_each && /^[[:space:]]*\]\)[[:space:]]*\(["'"'"']/ {
@@ -121,6 +143,24 @@ for f in "${UPSTREAM_FILES[@]}"; do
       printf("%s:%d\t%s\n", rel, each_line, name)
       in_each=0
       next
+    }
+    # Anything else that opens with test/it followed by "(", "." (a
+    # chained modifier such as .concurrent/.failing/.only/.skip/.todo, or
+    # a same-line test.each collision not caught above) or whitespace is
+    # a form this enumerator does not understand — e.g. a template-literal
+    # test name, test.concurrent(...), it.todo(...). Silently skipping it
+    # would under-count coverage without ever showing up as MISSING, since
+    # the same enumerator both produces and (via committed-output staleness
+    # checks) validates its own output. Fail closed instead.
+    /^[[:space:]]*(test|it)[.( ]/ {
+      printf("UNRECOGNIZED upstream test form at %s:%d: %s\n", rel, NR, $0) > "/dev/stderr"
+      exit 1
+    }
+    END {
+      if (in_each) {
+        printf("UNRECOGNIZED upstream test form: unterminated test.each block starting at %s:%d\n", rel, each_line) > "/dev/stderr"
+        exit 1
+      }
     }
   ' "$f"
 done > "$TMP_UPSTREAM"
@@ -304,6 +344,18 @@ fi
 
 if [ "$CHECK_MODE" = "1" ]; then
   exit_code=0
+  # Row-count floor: a TSV with only the header row means enumeration
+  # silently produced zero upstream test rows (e.g. an empty UPSTREAM_DIR
+  # match set on a bash where the empty-array guard above didn't fire, or
+  # every upstream file failed to match any recognized test form). The
+  # MISSING check below is vacuously true over zero rows, so it would not
+  # catch this on its own. Mirrors the matched_count==0 guard in
+  # .github/workflows/upstream-drift.yml.
+  row_count=$(($(wc -l < "$TSV_OUT" | tr -d ' ') - 1))
+  if (( row_count <= 0 )); then
+    echo "ERROR: coverage map has zero upstream test rows; refusing to treat that as passing. See $TSV_OUT."
+    exit_code=1
+  fi
   # any MISSING ?
   if awk -F '\t' 'NR>1 && $3=="MISSING" { print; found=1 } END { exit found?1:0 }' "$TSV_OUT" >/dev/null; then
     : # awk exit 0 means no missing

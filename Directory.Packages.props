@@ -7,7 +7,7 @@
   <ItemGroup>
     <!-- Production -->
     <PackageVersion Include="BouncyCastle.Cryptography" Version="[2.6.2]" />
-    <PackageVersion Include="System.Text.Json" Version="8.0.5" />
+    <PackageVersion Include="System.Text.Json" Version="8.0.6" />
 
     <!-- Test -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />

@@ -89,6 +89,71 @@ namespace Turnkey.Tests
         }
 
         [Fact]
+        public void Uint8ArrayFromHexString_Invalid_MessageDoesNotEchoTheInput()
+        {
+            // Seven call sites reach this decoder carrying private key material,
+            // and Crypto.cs re-wraps the message into its own exceptions, so an
+            // echoed value reaches callers and host logs. Shaped like a 32-byte
+            // key so a regression is obvious: valid hex except the last pair.
+            const string keyShaped =
+                "00112233445566778899aabbccddeeff00112233445566778899aabbccddeegg";
+
+            Action act = () => Encoding.Uint8ArrayFromHexString(keyShaped);
+
+            var message = act.Should().Throw<ArgumentException>().Which.Message;
+            message.Should().NotContain(keyShaped);
+            message.Should().NotContain("00112233");
+            message.Should().NotContain("ddee");
+            message.Should().StartWith("cannot create uint8array from invalid hex string");
+            message.Should().Contain("<redacted, length 64>");
+        }
+
+        [Fact]
+        public void Uint8ArrayFromHexString_TrailingNewline_ThrowsArgumentException()
+        {
+            // .NET's `$` also matches immediately before a trailing "\n", so the
+            // anchor has to be `\z` to reproduce the JS regex. With `$` this
+            // input passed validation and then failed inside the byte loop with a
+            // FormatException, which is not the documented failure mode and is
+            // not an ArgumentException.
+            Action act = () => Encoding.Uint8ArrayFromHexString("deadbee\n");
+
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("cannot create uint8array from invalid hex string*");
+        }
+
+        [Fact]
+        public void Uint8ArrayFromHexString_TrailingCarriageReturn_ThrowsArgumentException()
+        {
+            Action act = () => Encoding.Uint8ArrayFromHexString("deadbee\r");
+
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("cannot create uint8array from invalid hex string*");
+        }
+
+        [Fact]
+        public void Uint8ArrayFromHexString_WithoutTrailingNewline_StillDecodes()
+        {
+            // Positive control for the `\z` anchor change.
+            Encoding.Uint8ArrayFromHexString("deadbeef")
+                .Should().Equal(new byte[] { 0xde, 0xad, 0xbe, 0xef });
+        }
+
+        [Fact]
+        public void Uint8ArrayFromHexString_DecodesEveryByteValue_InBothHexCases()
+        {
+            // Gate for the per-byte decode: the nibble arithmetic must agree with
+            // Convert.ToByte(substring, 16) across the whole byte range and for
+            // upper- and lower-case hex digits alike.
+            var all = new byte[256];
+            for (int i = 0; i < 256; i++) all[i] = (byte)i;
+
+            string lower = Encoding.Uint8ArrayToHexString(all);
+            Encoding.Uint8ArrayFromHexString(lower).Should().Equal(all);
+            Encoding.Uint8ArrayFromHexString(lower.ToUpperInvariant()).Should().Equal(all);
+        }
+
+        [Fact]
         public void Uint8ArrayFromHexString_WithLength_Pads()
         {
             // "01" with length 2 -> [0, 1]

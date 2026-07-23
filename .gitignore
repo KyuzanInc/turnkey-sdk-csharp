@@ -31,6 +31,14 @@ project.fragment.lock.json
 # Reproducible upstream package archives (hashes are tracked, archives are not)
 tests/UpstreamSources/*.tgz
 
+# Local environment files. Never commit these: this repository is public, so
+# an accidental `git add -A` is immediately and irreversibly disclosed.
+# A local `.git/info/exclude` entry is not sufficient — it is per-clone and is
+# never committed, so it protects neither other contributors nor CI checkouts.
+.env
+.env.*
+!.env.example
+
 # OS
 .DS_Store
 Thumbs.db

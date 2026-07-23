@@ -52,6 +52,7 @@ Caller code ──► turnkey-sdk-csharp ──► HTTPS Turnkey API
 | T-10 | Test fixtures contain real org credentials | Only public upstream test vectors are retained and labeled; OSS-readiness scans review credential-shaped content. |
 | T-11 | CI logs include signed payloads or live credentials | CI uses committed public/de-identified fixtures, does not inject live Turnkey credentials, and does not echo generated payloads. |
 | T-12 | A future live-backend test leaks its test-org credentials | No live-backend harness is currently committed. Any future E2E path must use a separate manually triggered workflow, a protected environment, and sanitized logging. |
+| T-13 | Sensitive material (private keys, HKDF PRKs, HPKE shared secrets, AES keys, decrypted mnemonics) stays resident in process memory longer than necessary, widening the window for memory-disclosure attacks (core dumps, swap, debugger attach) | Partial: derivation and signing paths explicitly clear `byte[]` buffers holding these values after use, shortening exposure windows and reducing the number of live copies. This reduces, but does not eliminate, residency — see "Things this SDK does NOT do." |
 
 ## Things this SDK does NOT do
 
@@ -63,3 +64,10 @@ Caller code ──► turnkey-sdk-csharp ──► HTTPS Turnkey API
   API surface).
 - Does not handle Google OAuth, OTP, or any higher-level identity flow.
   Those belong to the consuming application.
+- Does not guarantee secrets are erased from memory. .NET `string` is
+  immutable and cannot be zeroed in place, and the .NET GC is compacting: it
+  may relocate (copy) a `byte[]` during collection before any explicit clear
+  runs, leaving the pre-move bytes resident until that page is reclaimed or
+  overwritten. Explicit `byte[]` clearing on the derivation and signing paths
+  shortens exposure windows and reduces the number of live copies; it is a
+  mitigation, not a guarantee of erasure (see T-13).

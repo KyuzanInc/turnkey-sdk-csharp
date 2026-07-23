@@ -96,4 +96,40 @@ mv "$TMP_ROOT/tests/UpstreamSources/package-checksums.txt.tmp" \
   "$TMP_ROOT/tests/UpstreamSources/package-checksums.txt"
 assert_check_fails_with "malformed package checksum manifest"
 
+# Retained-source checksum fields must also be lowercase 64-character
+# SHA-256 hex strings. This is not just format hygiene: upstream-drift.yml
+# embeds this same field verbatim in a Markdown-formatted GitHub issue
+# body without further sanitization, so a non-hex value here would be a
+# content-injection vector into that report.
+write_fixture 4
+awk '{$1 = "not-a-sha"; print}' \
+  "$TMP_ROOT/tests/UpstreamSources/source-file-checksums.txt" \
+  > "$TMP_ROOT/tests/UpstreamSources/source-file-checksums.txt.tmp"
+mv "$TMP_ROOT/tests/UpstreamSources/source-file-checksums.txt.tmp" \
+  "$TMP_ROOT/tests/UpstreamSources/source-file-checksums.txt"
+assert_check_fails_with "malformed retained-source path in checksum manifest"
+
+# The retained-path shape check also accepts package.json rows
+# (tests/UpstreamSources/<pkg>/package.json), even though the real
+# manifest does not have any yet: adding those rows lives under
+# tests/UpstreamSources/, which this script does not own. Exercise that
+# acceptance path here so it has coverage before any row exists for real.
+write_fixture 4
+for package in "${packages[@]}"; do
+  package_json_sha="$(shasum -a 256 "$TMP_ROOT/tests/UpstreamSources/$package/package.json" | awk '{print $1}')"
+  printf '%s  tests/UpstreamSources/%s/package.json\n' "$package_json_sha" "$package" \
+    >> "$TMP_ROOT/tests/UpstreamSources/source-file-checksums.txt"
+done
+"$TMP_ROOT/tools/compatibility/verify-source-checksums.sh"
+
+# ...and a wrong package.json checksum must still be caught.
+bad_sha="$(printf '%064d' 0)"
+awk -v pkg="tests/UpstreamSources/${packages[0]}/package.json" -v bad="$bad_sha" \
+  '{ if ($2 == pkg) $1 = bad; print }' \
+  "$TMP_ROOT/tests/UpstreamSources/source-file-checksums.txt" \
+  > "$TMP_ROOT/tests/UpstreamSources/source-file-checksums.txt.tmp"
+mv "$TMP_ROOT/tests/UpstreamSources/source-file-checksums.txt.tmp" \
+  "$TMP_ROOT/tests/UpstreamSources/source-file-checksums.txt"
+assert_check_fails_with "checksum mismatch: tests/UpstreamSources/${packages[0]}/package.json"
+
 echo "source checksum regression tests passed"
