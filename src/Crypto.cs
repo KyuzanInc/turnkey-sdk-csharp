@@ -108,29 +108,37 @@ namespace Turnkey
                 113, 201, 158, 80,
             };
 
+            // Each getter returns an INDEPENDENT copy of its backing array.
+            // Returning `ReadOnlyMemory<byte>` over the backing directly is not
+            // enough: `ReadOnlyMemory<byte>` is read-only only at the API level,
+            // and `MemoryMarshal.TryGetArray` recovers the wrapped array, letting
+            // a caller mutate the process-wide backing store. A fresh copy per
+            // access closes that escape hatch; internal derivation reads the
+            // *_BYTES backing directly and never pays this allocation.
+
             /// <summary>HPKE KEM suite ID, <c>"KEM\0\x10"</c>.</summary>
-            public static ReadOnlyMemory<byte> SUITE_ID_1 => SUITE_ID_1_BYTES;
+            public static ReadOnlyMemory<byte> SUITE_ID_1 => (byte[])SUITE_ID_1_BYTES.Clone();
 
             /// <summary>HPKE suite ID, <c>"HPKE\0\x10\0\x01\0\x02"</c>.</summary>
-            public static ReadOnlyMemory<byte> SUITE_ID_2 => SUITE_ID_2_BYTES;
+            public static ReadOnlyMemory<byte> SUITE_ID_2 => (byte[])SUITE_ID_2_BYTES.Clone();
 
             /// <summary>HPKE version label, <c>"HPKE-v1"</c>.</summary>
-            public static ReadOnlyMemory<byte> HPKE_VERSION => HPKE_VERSION_BYTES;
+            public static ReadOnlyMemory<byte> HPKE_VERSION => (byte[])HPKE_VERSION_BYTES.Clone();
 
             /// <summary>HPKE <c>"secret"</c> label.</summary>
-            public static ReadOnlyMemory<byte> LABEL_SECRET => LABEL_SECRET_BYTES;
+            public static ReadOnlyMemory<byte> LABEL_SECRET => (byte[])LABEL_SECRET_BYTES.Clone();
 
             /// <summary>HPKE <c>"eae_prk"</c> label.</summary>
-            public static ReadOnlyMemory<byte> LABEL_EAE_PRK => LABEL_EAE_PRK_BYTES;
+            public static ReadOnlyMemory<byte> LABEL_EAE_PRK => (byte[])LABEL_EAE_PRK_BYTES.Clone();
 
             /// <summary>HPKE <c>"shared_secret"</c> label.</summary>
-            public static ReadOnlyMemory<byte> LABEL_SHARED_SECRET => LABEL_SHARED_SECRET_BYTES;
+            public static ReadOnlyMemory<byte> LABEL_SHARED_SECRET => (byte[])LABEL_SHARED_SECRET_BYTES.Clone();
 
             /// <summary>Pre-computed HKDF expand "info" for the 32-byte AES key.</summary>
-            public static ReadOnlyMemory<byte> AES_KEY_INFO => AES_KEY_INFO_BYTES;
+            public static ReadOnlyMemory<byte> AES_KEY_INFO => (byte[])AES_KEY_INFO_BYTES.Clone();
 
             /// <summary>Pre-computed HKDF expand "info" for the 12-byte AES-GCM IV.</summary>
-            public static ReadOnlyMemory<byte> IV_INFO => IV_INFO_BYTES;
+            public static ReadOnlyMemory<byte> IV_INFO => (byte[])IV_INFO_BYTES.Clone();
 
             /// <summary>SEC1 uncompressed P-256 public key length, bytes (0x04 + X + Y).</summary>
             public const int UNCOMPRESSED_PUB_KEY_LENGTH_BYTES = 65;

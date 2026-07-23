@@ -1297,6 +1297,52 @@ namespace Turnkey.Tests
             Crypto.Constants.AES_KEY_INFO.Span[0].Should().Be(0);
         }
 
+        [Fact]
+        public void Constants_MemoryMarshalTryGetArray_CannotMutateBackingStore()
+        {
+            // ReadOnlyMemory<byte> is read-only only at the API level:
+            // MemoryMarshal.TryGetArray recovers the wrapped array. If the getter
+            // returned the backing store directly, this would corrupt every
+            // subsequent HPKE derivation process-wide. Because each access returns
+            // an independent copy, the mutation lands on the copy and the pinned
+            // bytes are unaffected.
+            var view = Crypto.Constants.AES_KEY_INFO;
+            System.Runtime.InteropServices.MemoryMarshal.TryGetArray(view, out var segment)
+                .Should().BeTrue();
+            segment.Array![segment.Offset] = 0xFF;
+
+            Crypto.Constants.AES_KEY_INFO.Span[0].Should().Be(0);
+            Crypto.Constants.AES_KEY_INFO.ToArray()[0].Should().Be(0);
+        }
+
+        [Fact]
+        public void Constants_EveryHpkeGetter_ReturnsAnIndependentCopy()
+        {
+            // Two accesses of the same constant must not share a backing array,
+            // so mutating one recovered array cannot affect another read.
+            ReadOnlyMemory<byte>[] pairsFirst =
+            {
+                Crypto.Constants.SUITE_ID_1, Crypto.Constants.SUITE_ID_2,
+                Crypto.Constants.HPKE_VERSION, Crypto.Constants.LABEL_SECRET,
+                Crypto.Constants.LABEL_EAE_PRK, Crypto.Constants.LABEL_SHARED_SECRET,
+                Crypto.Constants.AES_KEY_INFO, Crypto.Constants.IV_INFO,
+            };
+            ReadOnlyMemory<byte>[] pairsSecond =
+            {
+                Crypto.Constants.SUITE_ID_1, Crypto.Constants.SUITE_ID_2,
+                Crypto.Constants.HPKE_VERSION, Crypto.Constants.LABEL_SECRET,
+                Crypto.Constants.LABEL_EAE_PRK, Crypto.Constants.LABEL_SHARED_SECRET,
+                Crypto.Constants.AES_KEY_INFO, Crypto.Constants.IV_INFO,
+            };
+            for (int i = 0; i < pairsFirst.Length; i++)
+            {
+                System.Runtime.InteropServices.MemoryMarshal.TryGetArray(pairsFirst[i], out var a);
+                System.Runtime.InteropServices.MemoryMarshal.TryGetArray(pairsSecond[i], out var b);
+                ReferenceEquals(a.Array, b.Array).Should().BeFalse();
+                pairsFirst[i].ToArray().Should().Equal(pairsSecond[i].ToArray());
+            }
+        }
+
         // ============================================================
         // Trust anchors: static readonly + rotation set
         // ============================================================
