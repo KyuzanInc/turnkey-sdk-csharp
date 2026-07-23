@@ -17,6 +17,14 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # FluentAssertions 8.x moved to a commercial Xceed license
+      # (<license type="file">, projectUrl: xceed.com); 6.x and 7.x remain
+      # Apache-2.0. This repo declares "MIT AND Apache-2.0", so a major bump
+      # would silently add a paid-license dependency. Revisit manually.
+      - dependency-name: "FluentAssertions"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: github-actions
     directory: /
