@@ -72,17 +72,24 @@ namespace Turnkey
             // anyone who observes a cleartext request can replay it verbatim
             // against the real API. Enforcement has to live here because the SDK
             // hands back the URL rather than performing the request itself.
-            // Loopback is exempt so local mock/test servers keep working.
+            //
+            // The only exemption is plain http on a loopback host, for local
+            // mock/test servers. A loopback host does NOT license an arbitrary
+            // scheme: ftp://localhost or file://localhost is not an HTTP endpoint
+            // the caller's transport can use, so it is rejected too.
             if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var parsedBaseUrl))
             {
                 throw new ArgumentException(
                     "baseUrl must be an absolute URL", nameof(baseUrl));
             }
-            if (!string.Equals(parsedBaseUrl.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
-                && !parsedBaseUrl.IsLoopback)
+            bool isHttps = string.Equals(
+                parsedBaseUrl.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal);
+            bool isLoopbackHttp = parsedBaseUrl.IsLoopback
+                && string.Equals(parsedBaseUrl.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal);
+            if (!isHttps && !isLoopbackHttp)
             {
                 throw new ArgumentException(
-                    "baseUrl must use https (only loopback addresses may use another scheme)",
+                    "baseUrl must use https (plain http is allowed only for loopback hosts)",
                     nameof(baseUrl));
             }
 

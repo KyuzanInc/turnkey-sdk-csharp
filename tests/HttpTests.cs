@@ -601,6 +601,20 @@ namespace Turnkey.Tests
                .WithMessage("baseUrl must use https*");
         }
 
+        [Theory]
+        [InlineData("ftp://localhost")]
+        [InlineData("file://localhost/tmp/x")]
+        [InlineData("ws://127.0.0.1:9000")]
+        public void BaseUrl_LoopbackNonHttpScheme_IsRejected(string baseUrl)
+        {
+            // A loopback host does not license an arbitrary scheme: only plain
+            // http on loopback is exempt from the https requirement.
+            Action act = () => Http.FromTargetPrivateKey(FixturePrivateKey, baseUrl);
+
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("baseUrl must use https*");
+        }
+
         [Fact]
         public void BaseUrl_Relative_IsRejected()
         {
