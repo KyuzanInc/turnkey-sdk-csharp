@@ -41,19 +41,18 @@ namespace Turnkey
         public static bool VerifySessionJwtSignature(string jwt, string? dangerouslyOverrideNotarizerPublicKey = null) { }
         public static class Constants
         {
-            public const string PRODUCTION_NOTARIZER_SIGN_PUBLIC_KEY = "04d498aa87ac3bf982ac2b5dd9604d0074905cfbda5d62727c5a237b895e6749205e9f7cd566909c4" +
-                "387f6ca25c308445c60884b788560b785f4a96ac33702a469";
-            public const string PRODUCTION_SIGNER_SIGN_PUBLIC_KEY = "04cf288fe433cc4e1aa0ce1632feac4ea26bf2f5a09dcfe5a42c398e06898710330f0572882f4dbdf" +
-                "0f5304b8fc8703acd69adca9a4bbf7f5d00d20a5e364b2569";
             public const int UNCOMPRESSED_PUB_KEY_LENGTH_BYTES = 65;
-            public static readonly byte[] AES_KEY_INFO;
-            public static readonly byte[] HPKE_VERSION;
-            public static readonly byte[] IV_INFO;
-            public static readonly byte[] LABEL_EAE_PRK;
-            public static readonly byte[] LABEL_SECRET;
-            public static readonly byte[] LABEL_SHARED_SECRET;
-            public static readonly byte[] SUITE_ID_1;
-            public static readonly byte[] SUITE_ID_2;
+            public static readonly string PRODUCTION_NOTARIZER_SIGN_PUBLIC_KEY;
+            public static readonly string PRODUCTION_SIGNER_SIGN_PUBLIC_KEY;
+            public static readonly System.Collections.Generic.IReadOnlyList<string> ROTATION_SIGNER_SIGN_PUBLIC_KEYS;
+            public static System.ReadOnlyMemory<byte> AES_KEY_INFO { get; }
+            public static System.ReadOnlyMemory<byte> HPKE_VERSION { get; }
+            public static System.ReadOnlyMemory<byte> IV_INFO { get; }
+            public static System.ReadOnlyMemory<byte> LABEL_EAE_PRK { get; }
+            public static System.ReadOnlyMemory<byte> LABEL_SECRET { get; }
+            public static System.ReadOnlyMemory<byte> LABEL_SHARED_SECRET { get; }
+            public static System.ReadOnlyMemory<byte> SUITE_ID_1 { get; }
+            public static System.ReadOnlyMemory<byte> SUITE_ID_2 { get; }
         }
         public enum Curve
         {
