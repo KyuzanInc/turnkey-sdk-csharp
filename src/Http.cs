@@ -67,7 +67,34 @@ namespace Turnkey
                 throw new ArgumentException("baseUrl is required", nameof(baseUrl));
             }
 
-            _baseUrl = baseUrl;
+            // Require TLS. This class returns a Url paired with a valid X-Stamp,
+            // and that stamp is bearer-equivalent for the exact body it covers:
+            // anyone who observes a cleartext request can replay it verbatim
+            // against the real API. Enforcement has to live here because the SDK
+            // hands back the URL rather than performing the request itself.
+            //
+            // The only exemption is plain http on a loopback host, for local
+            // mock/test servers. A loopback host does NOT license an arbitrary
+            // scheme: ftp://localhost or file://localhost is not an HTTP endpoint
+            // the caller's transport can use, so it is rejected too.
+            if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var parsedBaseUrl))
+            {
+                throw new ArgumentException(
+                    "baseUrl must be an absolute URL", nameof(baseUrl));
+            }
+            bool isHttps = string.Equals(
+                parsedBaseUrl.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal);
+            bool isLoopbackHttp = parsedBaseUrl.IsLoopback
+                && string.Equals(parsedBaseUrl.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal);
+            if (!isHttps && !isLoopbackHttp)
+            {
+                throw new ArgumentException(
+                    "baseUrl must use https (plain http is allowed only for loopback hosts)",
+                    nameof(baseUrl));
+            }
+
+            // Trailing slashes would otherwise produce "https://host//public/v1/...".
+            _baseUrl = baseUrl.TrimEnd('/');
         }
 
         /// <summary>

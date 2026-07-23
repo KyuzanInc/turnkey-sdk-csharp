@@ -576,5 +576,81 @@ namespace Turnkey.Tests
             Action a4 = () => http.StampExportWalletAccount(null!);
             a4.Should().Throw<ArgumentNullException>();
         }
+
+        // ========================================================
+        // baseUrl TLS enforcement
+        // ========================================================
+
+        [Fact]
+        public void BaseUrl_Cleartext_IsRejected()
+        {
+            // An http:// base URL would be returned as SignedRequest.Url paired
+            // with a valid X-Stamp, which is replayable by anyone who sees it.
+            Action act = () => Http.FromTargetPrivateKey(FixturePrivateKey, "http://api.turnkey.com");
+
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("baseUrl must use https*");
+        }
+
+        [Fact]
+        public void BaseUrl_NonHttpScheme_IsRejected()
+        {
+            Action act = () => Http.FromTargetPrivateKey(FixturePrivateKey, "ftp://api.turnkey.com");
+
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("baseUrl must use https*");
+        }
+
+        [Theory]
+        [InlineData("ftp://localhost")]
+        [InlineData("file://localhost/tmp/x")]
+        [InlineData("ws://127.0.0.1:9000")]
+        public void BaseUrl_LoopbackNonHttpScheme_IsRejected(string baseUrl)
+        {
+            // A loopback host does not license an arbitrary scheme: only plain
+            // http on loopback is exempt from the https requirement.
+            Action act = () => Http.FromTargetPrivateKey(FixturePrivateKey, baseUrl);
+
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("baseUrl must use https*");
+        }
+
+        [Fact]
+        public void BaseUrl_Relative_IsRejected()
+        {
+            Action act = () => Http.FromTargetPrivateKey(FixturePrivateKey, "api.turnkey.com");
+
+            act.Should().Throw<ArgumentException>()
+               .WithMessage("baseUrl must be an absolute URL*");
+        }
+
+        [Theory]
+        [InlineData("http://localhost:8080")]
+        [InlineData("http://127.0.0.1:3000")]
+        public void BaseUrl_LoopbackOverHttp_IsAllowed(string baseUrl)
+        {
+            var http = Http.FromTargetPrivateKey(FixturePrivateKey, baseUrl);
+
+            http.StampGetWhoami("org-id").Url
+                .Should().Be(baseUrl + "/public/v1/query/whoami");
+        }
+
+        [Fact]
+        public void BaseUrl_TrailingSlash_IsTrimmed()
+        {
+            var http = Http.FromTargetPrivateKey(FixturePrivateKey, "https://staging.example.com/");
+
+            http.StampGetWhoami("org-id").Url
+                .Should().Be("https://staging.example.com/public/v1/query/whoami");
+        }
+
+        [Fact]
+        public void BaseUrl_Https_IsUnchanged()
+        {
+            var http = Http.FromTargetPrivateKey(FixturePrivateKey, "https://staging.example.com");
+
+            http.StampGetWhoami("org-id").Url
+                .Should().Be("https://staging.example.com/public/v1/query/whoami");
+        }
     }
 }

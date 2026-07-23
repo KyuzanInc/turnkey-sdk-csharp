@@ -1245,6 +1245,165 @@ namespace Turnkey.Tests
         }
 
         // ============================================================
+        // HPKE constants exposed as ReadOnlyMemory<byte>
+        // ============================================================
+
+        [Fact]
+        public void Constants_HpkeByteValues_UnchangedByReadOnlyMemoryConversion()
+        {
+            // Independent copies of the pre-change literals. Any drift here is a
+            // wire-format change.
+            Crypto.Constants.SUITE_ID_1.ToArray().Should().Equal(
+                new byte[] { 75, 69, 77, 0, 16 });
+            Crypto.Constants.SUITE_ID_2.ToArray().Should().Equal(
+                new byte[] { 72, 80, 75, 69, 0, 16, 0, 1, 0, 2 });
+            Crypto.Constants.HPKE_VERSION.ToArray().Should().Equal(
+                new byte[] { 72, 80, 75, 69, 45, 118, 49 });
+            Crypto.Constants.LABEL_SECRET.ToArray().Should().Equal(
+                new byte[] { 115, 101, 99, 114, 101, 116 });
+            Crypto.Constants.LABEL_EAE_PRK.ToArray().Should().Equal(
+                new byte[] { 101, 97, 101, 95, 112, 114, 107 });
+            Crypto.Constants.LABEL_SHARED_SECRET.ToArray().Should().Equal(
+                new byte[] { 115, 104, 97, 114, 101, 100, 95, 115, 101, 99, 114, 101, 116 });
+
+            Crypto.Constants.AES_KEY_INFO.ToArray().Should().Equal(new byte[]
+            {
+                0, 32, 72, 80, 75, 69, 45, 118, 49, 72, 80, 75, 69, 0, 16, 0, 1, 0, 2, 107,
+                101, 121, 0, 143, 195, 174, 184, 50, 73, 10, 75, 90, 179, 228, 32, 35, 40,
+                125, 178, 154, 31, 75, 199, 194, 34, 192, 223, 34, 135, 39, 183, 10, 64, 33,
+                18, 47, 63, 4, 233, 32, 108, 209, 36, 19, 80, 53, 41, 180, 122, 198, 166, 48,
+                185, 46, 196, 207, 125, 35, 69, 8, 208, 175, 151, 113, 201, 158, 80,
+            });
+            Crypto.Constants.IV_INFO.ToArray().Should().Equal(new byte[]
+            {
+                0, 12, 72, 80, 75, 69, 45, 118, 49, 72, 80, 75, 69, 0, 16, 0, 1, 0, 2, 98, 97,
+                115, 101, 95, 110, 111, 110, 99, 101, 0, 143, 195, 174, 184, 50, 73, 10, 75,
+                90, 179, 228, 32, 35, 40, 125, 178, 154, 31, 75, 199, 194, 34, 192, 223, 34,
+                135, 39, 183, 10, 64, 33, 18, 47, 63, 4, 233, 32, 108, 209, 36, 19, 80, 53,
+                41, 180, 122, 198, 166, 48, 185, 46, 196, 207, 125, 35, 69, 8, 208, 175, 151,
+                113, 201, 158, 80,
+            });
+        }
+
+        [Fact]
+        public void Constants_ToArray_HandsOutCopiesNotTheBackingStore()
+        {
+            // The point of the conversion: a caller cannot reach the array the
+            // key schedule actually reads.
+            var first = Crypto.Constants.AES_KEY_INFO.ToArray();
+            first[0] = 0xFF;
+
+            Crypto.Constants.AES_KEY_INFO.ToArray()[0].Should().Be(0);
+            Crypto.Constants.AES_KEY_INFO.Span[0].Should().Be(0);
+        }
+
+        [Fact]
+        public void Constants_MemoryMarshalTryGetArray_CannotMutateBackingStore()
+        {
+            // ReadOnlyMemory<byte> is read-only only at the API level:
+            // MemoryMarshal.TryGetArray recovers the wrapped array. If the getter
+            // returned the backing store directly, this would corrupt every
+            // subsequent HPKE derivation process-wide. Because each access returns
+            // an independent copy, the mutation lands on the copy and the pinned
+            // bytes are unaffected.
+            var view = Crypto.Constants.AES_KEY_INFO;
+            System.Runtime.InteropServices.MemoryMarshal.TryGetArray(view, out var segment)
+                .Should().BeTrue();
+            segment.Array![segment.Offset] = 0xFF;
+
+            Crypto.Constants.AES_KEY_INFO.Span[0].Should().Be(0);
+            Crypto.Constants.AES_KEY_INFO.ToArray()[0].Should().Be(0);
+        }
+
+        [Fact]
+        public void Constants_EveryHpkeGetter_ReturnsAnIndependentCopy()
+        {
+            // Two accesses of the same constant must not share a backing array,
+            // so mutating one recovered array cannot affect another read.
+            ReadOnlyMemory<byte>[] pairsFirst =
+            {
+                Crypto.Constants.SUITE_ID_1, Crypto.Constants.SUITE_ID_2,
+                Crypto.Constants.HPKE_VERSION, Crypto.Constants.LABEL_SECRET,
+                Crypto.Constants.LABEL_EAE_PRK, Crypto.Constants.LABEL_SHARED_SECRET,
+                Crypto.Constants.AES_KEY_INFO, Crypto.Constants.IV_INFO,
+            };
+            ReadOnlyMemory<byte>[] pairsSecond =
+            {
+                Crypto.Constants.SUITE_ID_1, Crypto.Constants.SUITE_ID_2,
+                Crypto.Constants.HPKE_VERSION, Crypto.Constants.LABEL_SECRET,
+                Crypto.Constants.LABEL_EAE_PRK, Crypto.Constants.LABEL_SHARED_SECRET,
+                Crypto.Constants.AES_KEY_INFO, Crypto.Constants.IV_INFO,
+            };
+            for (int i = 0; i < pairsFirst.Length; i++)
+            {
+                System.Runtime.InteropServices.MemoryMarshal.TryGetArray(pairsFirst[i], out var a);
+                System.Runtime.InteropServices.MemoryMarshal.TryGetArray(pairsSecond[i], out var b);
+                ReferenceEquals(a.Array, b.Array).Should().BeFalse();
+                pairsFirst[i].ToArray().Should().Equal(pairsSecond[i].ToArray());
+            }
+        }
+
+        // ============================================================
+        // Trust anchors: static readonly + rotation set
+        // ============================================================
+
+        [Fact]
+        public void Constants_ProductionKeys_ValuesUnchangedByConstToStaticReadonly()
+        {
+            Crypto.Constants.PRODUCTION_SIGNER_SIGN_PUBLIC_KEY.Should().Be(
+                "04cf288fe433cc4e1aa0ce1632feac4ea26bf2f5a09dcfe5a42c398e06898710330f0572882f"
+                + "4dbdf0f5304b8fc8703acd69adca9a4bbf7f5d00d20a5e364b2569");
+            Crypto.Constants.PRODUCTION_NOTARIZER_SIGN_PUBLIC_KEY.Should().Be(
+                "04d498aa87ac3bf982ac2b5dd9604d0074905cfbda5d62727c5a237b895e6749205e9f7cd566"
+                + "909c4387f6ca25c308445c60884b788560b785f4a96ac33702a469");
+        }
+
+        [Fact]
+        public void Constants_RotationSignerKeys_EmptyOutsideRotationWindow()
+        {
+            // Guard rail: adding a rotation anchor must be a deliberate, reviewed
+            // edit that also updates this test.
+            Crypto.Constants.ROTATION_SIGNER_SIGN_PUBLIC_KEYS.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void Constants_RotationSignerKeys_AreImmutable()
+        {
+            var asCollection =
+                Crypto.Constants.ROTATION_SIGNER_SIGN_PUBLIC_KEYS
+                as System.Collections.Generic.ICollection<string>;
+
+            asCollection.Should().NotBeNull();
+            asCollection!.IsReadOnly.Should().BeTrue();
+            Action act = () => asCollection.Add("04deadbeef");
+            act.Should().Throw<NotSupportedException>();
+        }
+
+        [Fact]
+        public void VerifyEnclaveSignature_ExplicitOverride_IsNotWidenedByRotationSet()
+        {
+            // An explicit override means "trust exactly this key". A bundle signed
+            // by the pinned production signer must still be rejected when the
+            // caller pinned a different anchor.
+            var other = new TestP256Signer();
+
+#pragma warning disable 618 // deliberate test-only trust-anchor override
+            Action act = () => Crypto.DecryptExportBundle(new Crypto.DecryptExportBundleParams
+            {
+                ExportBundle = UpstreamExportBundleJson,
+                EmbeddedKey = UpstreamExportEmbeddedKey,
+                OrganizationId = UpstreamExportOrganizationId,
+                KeyFormat = "HEXADECIMAL",
+                ReturnMnemonic = true,
+                DangerouslyOverrideSignerPublicKey = other.PublicKeyHex,
+            });
+#pragma warning restore 618
+
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("*does not match signer key from bundle*");
+        }
+
+        // ============================================================
         // Helpers
         // ============================================================
 

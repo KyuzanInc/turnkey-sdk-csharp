@@ -39,6 +39,8 @@
 //   - Newtonsoft.Json dependency dropped.
 
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -67,21 +69,27 @@ namespace Turnkey
         /// </summary>
         public static class Constants
         {
+            // HPKE constants are exposed as ReadOnlyMemory<byte> over private
+            // backing arrays. A `public static readonly byte[]` protects only the
+            // reference: any caller could write `Constants.AES_KEY_INFO[0] = 0`
+            // and silently repoint every subsequent HPKE key derivation in the
+            // process. The internal *_BYTES backing keeps byte[] semantics for
+            // in-assembly use; the public surface is read-only.
+
             // HPKE KEM/HPKE suite IDs.
-            public static readonly byte[] SUITE_ID_1 = new byte[] { 75, 69, 77, 0, 16 }; // "KEM\0\x10"
-            public static readonly byte[] SUITE_ID_2 = new byte[] { 72, 80, 75, 69, 0, 16, 0, 1, 0, 2 }; // "HPKE\0\x10\0\x01\0\x02"
-            public static readonly byte[] HPKE_VERSION = new byte[] { 72, 80, 75, 69, 45, 118, 49 }; // "HPKE-v1"
+            internal static readonly byte[] SUITE_ID_1_BYTES = { 75, 69, 77, 0, 16 }; // "KEM\0\x10"
+            internal static readonly byte[] SUITE_ID_2_BYTES = { 72, 80, 75, 69, 0, 16, 0, 1, 0, 2 }; // "HPKE\0\x10\0\x01\0\x02"
+            internal static readonly byte[] HPKE_VERSION_BYTES = { 72, 80, 75, 69, 45, 118, 49 }; // "HPKE-v1"
 
             // HPKE labels.
-            public static readonly byte[] LABEL_SECRET = new byte[] { 115, 101, 99, 114, 101, 116 }; // "secret"
-            public static readonly byte[] LABEL_EAE_PRK = new byte[] { 101, 97, 101, 95, 112, 114, 107 }; // "eae_prk"
-            public static readonly byte[] LABEL_SHARED_SECRET = new byte[]
+            internal static readonly byte[] LABEL_SECRET_BYTES = { 115, 101, 99, 114, 101, 116 }; // "secret"
+            internal static readonly byte[] LABEL_EAE_PRK_BYTES = { 101, 97, 101, 95, 112, 114, 107 }; // "eae_prk"
+            internal static readonly byte[] LABEL_SHARED_SECRET_BYTES =
             {
                 115, 104, 97, 114, 101, 100, 95, 115, 101, 99, 114, 101, 116, // "shared_secret"
             };
 
-            /// <summary>Pre-computed HKDF expand "info" for the 32-byte AES key.</summary>
-            public static readonly byte[] AES_KEY_INFO = new byte[]
+            internal static readonly byte[] AES_KEY_INFO_BYTES =
             {
                 0, 32, 72, 80, 75, 69, 45, 118, 49, 72, 80, 75, 69, 0, 16, 0, 1, 0, 2, 107,
                 101, 121, 0, 143, 195, 174, 184, 50, 73, 10, 75, 90, 179, 228, 32, 35, 40,
@@ -90,8 +98,7 @@ namespace Turnkey
                 185, 46, 196, 207, 125, 35, 69, 8, 208, 175, 151, 113, 201, 158, 80,
             };
 
-            /// <summary>Pre-computed HKDF expand "info" for the 12-byte AES-GCM IV.</summary>
-            public static readonly byte[] IV_INFO = new byte[]
+            internal static readonly byte[] IV_INFO_BYTES =
             {
                 0, 12, 72, 80, 75, 69, 45, 118, 49, 72, 80, 75, 69, 0, 16, 0, 1, 0, 2, 98, 97,
                 115, 101, 95, 110, 111, 110, 99, 101, 0, 143, 195, 174, 184, 50, 73, 10, 75,
@@ -101,16 +108,73 @@ namespace Turnkey
                 113, 201, 158, 80,
             };
 
+            // Each getter returns an INDEPENDENT copy of its backing array.
+            // Returning `ReadOnlyMemory<byte>` over the backing directly is not
+            // enough: `ReadOnlyMemory<byte>` is read-only only at the API level,
+            // and `MemoryMarshal.TryGetArray` recovers the wrapped array, letting
+            // a caller mutate the process-wide backing store. A fresh copy per
+            // access closes that escape hatch; internal derivation reads the
+            // *_BYTES backing directly and never pays this allocation.
+
+            /// <summary>HPKE KEM suite ID, <c>"KEM\0\x10"</c>.</summary>
+            public static ReadOnlyMemory<byte> SUITE_ID_1 => (byte[])SUITE_ID_1_BYTES.Clone();
+
+            /// <summary>HPKE suite ID, <c>"HPKE\0\x10\0\x01\0\x02"</c>.</summary>
+            public static ReadOnlyMemory<byte> SUITE_ID_2 => (byte[])SUITE_ID_2_BYTES.Clone();
+
+            /// <summary>HPKE version label, <c>"HPKE-v1"</c>.</summary>
+            public static ReadOnlyMemory<byte> HPKE_VERSION => (byte[])HPKE_VERSION_BYTES.Clone();
+
+            /// <summary>HPKE <c>"secret"</c> label.</summary>
+            public static ReadOnlyMemory<byte> LABEL_SECRET => (byte[])LABEL_SECRET_BYTES.Clone();
+
+            /// <summary>HPKE <c>"eae_prk"</c> label.</summary>
+            public static ReadOnlyMemory<byte> LABEL_EAE_PRK => (byte[])LABEL_EAE_PRK_BYTES.Clone();
+
+            /// <summary>HPKE <c>"shared_secret"</c> label.</summary>
+            public static ReadOnlyMemory<byte> LABEL_SHARED_SECRET => (byte[])LABEL_SHARED_SECRET_BYTES.Clone();
+
+            /// <summary>Pre-computed HKDF expand "info" for the 32-byte AES key.</summary>
+            public static ReadOnlyMemory<byte> AES_KEY_INFO => (byte[])AES_KEY_INFO_BYTES.Clone();
+
+            /// <summary>Pre-computed HKDF expand "info" for the 12-byte AES-GCM IV.</summary>
+            public static ReadOnlyMemory<byte> IV_INFO => (byte[])IV_INFO_BYTES.Clone();
+
             /// <summary>SEC1 uncompressed P-256 public key length, bytes (0x04 + X + Y).</summary>
             public const int UNCOMPRESSED_PUB_KEY_LENGTH_BYTES = 65;
 
             /// <summary>Production signer used by Turnkey to sign export/import bundles.</summary>
-            public const string PRODUCTION_SIGNER_SIGN_PUBLIC_KEY =
+            /// <remarks>
+            /// Declared <c>static readonly</c>, not <c>const</c>: a C# <c>const</c>
+            /// is inlined into every consuming assembly at that assembly's compile
+            /// time, so a rotated key would not reach a consumer that merely
+            /// upgrades the package. <c>static readonly</c> is read from this
+            /// assembly at run time, so a package upgrade is sufficient.
+            /// </remarks>
+            public static readonly string PRODUCTION_SIGNER_SIGN_PUBLIC_KEY =
                 "04cf288fe433cc4e1aa0ce1632feac4ea26bf2f5a09dcfe5a42c398e06898710330f0572882f4dbdf0f5304b8fc8703acd69adca9a4bbf7f5d00d20a5e364b2569";
 
             /// <summary>Production notarizer used by Turnkey to sign session JWTs.</summary>
-            public const string PRODUCTION_NOTARIZER_SIGN_PUBLIC_KEY =
+            /// <remarks>See the rotation note on
+            /// <see cref="PRODUCTION_SIGNER_SIGN_PUBLIC_KEY"/>.</remarks>
+            public static readonly string PRODUCTION_NOTARIZER_SIGN_PUBLIC_KEY =
                 "04d498aa87ac3bf982ac2b5dd9604d0074905cfbda5d62727c5a237b895e6749205e9f7cd566909c4387f6ca25c308445c60884b788560b785f4a96ac33702a469";
+
+            /// <summary>
+            /// Signer keys accepted alongside — never instead of —
+            /// <see cref="PRODUCTION_SIGNER_SIGN_PUBLIC_KEY"/> during a signer
+            /// rotation overlap window. Empty outside a rotation.
+            /// </summary>
+            /// <remarks>
+            /// Deliberately additive. Rotating by *replacing* the pinned key leaves
+            /// a window in which bundles signed by the other key are rejected, and
+            /// makes "swap the pin" the normal maintenance operation — exactly what
+            /// an attacker wants to induce. Accepting the union means old and new
+            /// anchors both verify during the overlap; the retired key is removed in
+            /// a later, separate change.
+            /// </remarks>
+            public static readonly IReadOnlyList<string> ROTATION_SIGNER_SIGN_PUBLIC_KEYS =
+                new ReadOnlyCollection<string>(new string[0]);
         }
 
         #endregion
@@ -485,15 +549,15 @@ namespace Turnkey
                 var ss = DeriveSS(encappedKeyBuf, receiverPriv);
                 var kemContext = GetKemContext(encappedKeyBuf, Encoding.Uint8ArrayToHexString(receiverPubBuf));
 
-                var ikm = BuildLabeledIkm(Constants.LABEL_EAE_PRK, ss, Constants.SUITE_ID_1);
-                var info = BuildLabeledInfo(Constants.LABEL_SHARED_SECRET, kemContext, Constants.SUITE_ID_1, 32);
+                var ikm = BuildLabeledIkm(Constants.LABEL_EAE_PRK_BYTES, ss, Constants.SUITE_ID_1_BYTES);
+                var info = BuildLabeledInfo(Constants.LABEL_SHARED_SECRET_BYTES, kemContext, Constants.SUITE_ID_1_BYTES, 32);
                 var sharedSecret = ExtractAndExpand(Array.Empty<byte>(), ikm, info, 32);
 
-                ikm = BuildLabeledIkm(Constants.LABEL_SECRET, Array.Empty<byte>(), Constants.SUITE_ID_2);
-                info = Constants.AES_KEY_INFO;
+                ikm = BuildLabeledIkm(Constants.LABEL_SECRET_BYTES, Array.Empty<byte>(), Constants.SUITE_ID_2_BYTES);
+                info = Constants.AES_KEY_INFO_BYTES;
                 var key = ExtractAndExpand(sharedSecret, ikm, info, 32);
 
-                info = Constants.IV_INFO;
+                info = Constants.IV_INFO_BYTES;
                 var iv = ExtractAndExpand(sharedSecret, ikm, info, 12);
 
                 return AesGcmDecrypt(ciphertextBuf, key, iv, aad);
@@ -539,15 +603,15 @@ namespace Turnkey
                 var ss = DeriveSS(targetKeyBuf, senderPrivBuf);
                 var kemContext = GetKemContext(senderPubBuf, Encoding.Uint8ArrayToHexString(targetKeyBuf));
 
-                var ikm = BuildLabeledIkm(Constants.LABEL_EAE_PRK, ss, Constants.SUITE_ID_1);
-                var info = BuildLabeledInfo(Constants.LABEL_SHARED_SECRET, kemContext, Constants.SUITE_ID_1, 32);
+                var ikm = BuildLabeledIkm(Constants.LABEL_EAE_PRK_BYTES, ss, Constants.SUITE_ID_1_BYTES);
+                var info = BuildLabeledInfo(Constants.LABEL_SHARED_SECRET_BYTES, kemContext, Constants.SUITE_ID_1_BYTES, 32);
                 var sharedSecret = ExtractAndExpand(Array.Empty<byte>(), ikm, info, 32);
 
-                ikm = BuildLabeledIkm(Constants.LABEL_SECRET, Array.Empty<byte>(), Constants.SUITE_ID_2);
-                info = Constants.AES_KEY_INFO;
+                ikm = BuildLabeledIkm(Constants.LABEL_SECRET_BYTES, Array.Empty<byte>(), Constants.SUITE_ID_2_BYTES);
+                info = Constants.AES_KEY_INFO_BYTES;
                 var key = ExtractAndExpand(sharedSecret, ikm, info, 32);
 
-                info = Constants.IV_INFO;
+                info = Constants.IV_INFO_BYTES;
                 var iv = ExtractAndExpand(sharedSecret, ikm, info, 12);
 
                 var encryptedData = AesGcmEncrypt(plainTextBuf, key, iv, aad);
@@ -1446,7 +1510,7 @@ namespace Turnkey
 
         private static byte[] BuildLabeledIkm(byte[] label, byte[] ikm, byte[] suiteId)
         {
-            return Encoding.ConcatUint8Arrays(Constants.HPKE_VERSION, suiteId, label, ikm);
+            return Encoding.ConcatUint8Arrays(Constants.HPKE_VERSION_BYTES, suiteId, label, ikm);
         }
 
         private static byte[] BuildLabeledInfo(byte[] label, byte[] info, byte[] suiteId, int len)
@@ -1457,7 +1521,7 @@ namespace Turnkey
             ret[0] = 0;
             ret[1] = (byte)len;
 
-            Array.Copy(Constants.HPKE_VERSION, 0, ret, 2, Constants.HPKE_VERSION.Length);
+            Array.Copy(Constants.HPKE_VERSION_BYTES, 0, ret, 2, Constants.HPKE_VERSION_BYTES.Length);
             Array.Copy(suiteId, 0, ret, suiteIdStartIndex, suiteId.Length);
             Array.Copy(label, 0, ret, suiteIdStartIndex + suiteId.Length, label.Length);
             Array.Copy(info, 0, ret, suiteIdStartIndex + suiteId.Length + label.Length, info.Length);
@@ -1620,7 +1684,28 @@ namespace Turnkey
             string expectedSignerPublicKey =
                 dangerouslyOverrideSignerPublicKey ?? Constants.PRODUCTION_SIGNER_SIGN_PUBLIC_KEY;
 
-            if (!string.Equals(enclaveQuorumPublic, expectedSignerPublicKey, StringComparison.Ordinal))
+            // Rotation anchors apply ONLY when the caller supplied no explicit
+            // override. An explicit override means "trust exactly this key", and
+            // silently widening it to the rotation set would defeat that intent.
+            bool anchorAccepted = string.Equals(
+                enclaveQuorumPublic, expectedSignerPublicKey, StringComparison.Ordinal);
+
+            if (!anchorAccepted && dangerouslyOverrideSignerPublicKey == null)
+            {
+                var rotationKeys = Constants.ROTATION_SIGNER_SIGN_PUBLIC_KEYS;
+                for (int i = 0; i < rotationKeys.Count; i++)
+                {
+                    if (string.Equals(enclaveQuorumPublic, rotationKeys[i], StringComparison.Ordinal))
+                    {
+                        // Verify against the matched anchor, not the pin.
+                        expectedSignerPublicKey = rotationKeys[i];
+                        anchorAccepted = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!anchorAccepted)
             {
                 throw new InvalidOperationException(
                     "expected signer key " + expectedSignerPublicKey
