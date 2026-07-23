@@ -57,18 +57,36 @@ if ! cmp -s "$expected_packages" "$package_manifest_packages"; then
   exit 1
 fi
 
+# The hex/length check on $1 here is not just format hygiene: it is the
+# only thing that keeps .github/workflows/upstream-drift.yml's drift
+# report safe. That workflow reads this same $MANIFEST, puts $1
+# (as expected_sha) straight into a Markdown code span inside a GitHub
+# issue body, and nothing in that workflow itself sanitizes it. Once $1 is
+# constrained to 64 lowercase hex characters, it cannot contain a
+# backtick, newline, or Markdown/link syntax, which is what makes that
+# embedding safe. If this check is ever loosened, upstream-drift.yml's
+# report generation must be re-reviewed for injection.
+# Accepts two retained-path shapes: the ts-source tree
+# (tests/UpstreamSources/<pkg>/ts-source/...) and each package's retained
+# package.json (tests/UpstreamSources/<pkg>/package.json) directly. The
+# latter is currently existence-checked only (see below) — no
+# package.json rows exist in $MANIFEST yet — but this validation already
+# accepts them so a future change that adds those rows (to
+# tests/UpstreamSources/, which this script does not own) does not also
+# need to touch this shape check.
 if ! awk '
   /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
-  NF < 2 { exit 1 }
+  NF < 2 ||
+    length($1) != 64 ||
+    $1 ~ /[^0-9a-f]/ { exit 1 }
   {
     count = split($2, parts, "/")
-    if (count < 5 ||
-        parts[1] != "tests" ||
-        parts[2] != "UpstreamSources" ||
-        parts[3] == "" ||
-        parts[4] != "ts-source") {
-      exit 1
+    valid = 0
+    if (parts[1] == "tests" && parts[2] == "UpstreamSources" && parts[3] != "") {
+      if (count >= 5 && parts[4] == "ts-source") valid = 1
+      else if (count == 4 && parts[4] == "package.json") valid = 1
     }
+    if (!valid) exit 1
     print parts[3]
   }
 ' "$MANIFEST" > "$manifest_package_entries"; then
@@ -90,7 +108,11 @@ while IFS= read -r package; do
   fi
 done < "$expected_packages"
 
-awk '!/^#/ && NF >= 2 { print $2 }' "$MANIFEST" | sort > "$expected_paths"
+# Scoped to ts-source/ rows: package.json rows (see the shape check above)
+# live directly under the package directory, not under ts-source/, so
+# they are intentionally excluded from this ts-source-tree-vs-manifest
+# comparison and are covered by the checksum loop below instead.
+awk '!/^#/ && NF >= 2 && $2 ~ /\/ts-source\// { print $2 }' "$MANIFEST" | sort > "$expected_paths"
 find tests/UpstreamSources -type f -path '*/ts-source/*' | sort > "$actual_paths"
 
 if ! cmp -s "$expected_paths" "$actual_paths"; then

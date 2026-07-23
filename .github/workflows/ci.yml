@@ -43,10 +43,24 @@ jobs:
             --results-directory ./TestResults \
             --logger "trx;LogFileName=test-results.trx"
 
+      # upstream-drift.yml itself only runs on a monthly schedule / manual
+      # dispatch and is never a PR gate, but a quoting bug in its embedded
+      # report script can otherwise sit silently broken for a month. This
+      # regression test extracts and executes that script directly, so it
+      # still gets PR-time coverage.
+      - name: Upstream-drift report script regression test
+        run: ./tools/tests/upstream-drift-report-test.sh
+
       - name: Action pin gate regression tests
         run: ./tools/tests/verify-action-pins-test.sh
 
       - name: Verify third-party action pins and manifest
+        env:
+          # Used by `gh api` to confirm each pinned SHA is a real commit
+          # object, not an annotated tag object. Authenticating raises the
+          # rate limit from the 60/hour shared across all traffic from a
+          # GitHub-hosted runner's IP to 5000/hour for this job.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./tools/verify-action-pins.sh
 
       - name: Source checksum gate regression tests
@@ -77,16 +91,64 @@ jobs:
       #      Crypto.DecryptCredentialBundle / EncryptPrivateKeyToBundle /
       #      DecryptExportBundle error paths once Turnkey sample bundles
       #      are committable.
+      # Formerly irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95
+      # (v1.3.0). That action's own runs.using is 'docker' with
+      # image: 'docker://ghcr.io/irongut/codecoveragesummary:v1.3.0' — a
+      # MUTABLE image tag, not a digest. Pinning the action repo to a
+      # commit SHA does not pin what actually executes, since the
+      # container is pulled by tag at run time. Replaced with an inline
+      # equivalent computed directly from the cobertura XML the test step
+      # already produced, so the executed code is this file.
+      #
+      # Reproduces irongut's exact algorithm (verified against its source
+      # at the pin above): read the root <coverage line-rate="..."> of
+      # every matched file, average those rates UNWEIGHTED across files
+      # (not a lines-covered/lines-valid weighted average — irongut does
+      # `sum(line-rate) / file-count`, and this repo's single test run
+      # happens to emit two byte-identical copies of the same
+      # coverage.cobertura.xml under TestResults/**, so this matters),
+      # and fail if the average is strictly below 30% (irongut's
+      # `fail_below_min` compares with `<`, so exactly 30% passes).
       - name: Coverage gate (>=30% combined-TFM line)
-        # irongut/CodeCoverageSummary v1.3.0 — see .github/pin-actions.txt
-        uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95
-        with:
-          filename: TestResults/**/coverage.cobertura.xml
-          badge: false
-          fail_below_min: true
-          thresholds: '30 50'
-          format: markdown
-          output: both
+        run: |
+          set -euo pipefail
+          files=()
+          while IFS= read -r f; do
+            files+=("$f")
+          done < <(find TestResults -type f -name 'coverage.cobertura.xml' | sort)
+
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No coverage.cobertura.xml files found under TestResults/."
+            exit 1
+          fi
+
+          awk '
+            /^<coverage / {
+              line = $0
+              if (match(line, /line-rate="[0-9.]+"/)) {
+                frag = substr(line, RSTART, RLENGTH)
+                sub(/^line-rate="/, "", frag)
+                sub(/"$/, "", frag)
+                rate = frag + 0
+                sum += rate
+                count++
+                printf("Coverage file: %s (line-rate=%.2f%%)\n", FILENAME, rate * 100)
+              }
+            }
+            END {
+              if (count == 0) {
+                print "::error::no coverage.cobertura.xml file had a parsable <coverage line-rate=\"...\"> root element"
+                exit 1
+              }
+              avg = sum / count
+              printf("Summary: Line Rate = %.2f%% (unweighted average across %d file(s))\n", avg * 100, count)
+              if (avg < 0.30) {
+                printf("::error::FAIL: overall line rate %.2f%% is below the 30%% minimum threshold.\n", avg * 100)
+                exit 1
+              }
+              printf("PASS: overall line rate %.2f%% meets the 30%% minimum threshold.\n", avg * 100)
+            }
+          ' "${files[@]}"
 
       - name: Upload coverage artifact
         # actions/upload-artifact v7.0.1 — see .github/pin-actions.txt
