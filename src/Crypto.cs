@@ -1225,25 +1225,42 @@ namespace Turnkey
                         PayloadJson = payloadJson,
                     };
 
-                    if (TryGetNumericDate(root, "nbf", out var notBefore))
+                    // nbf is optional, but a present-but-malformed nbf must be
+                    // rejected rather than silently ignored: treating a garbage
+                    // not-before as absent would bypass the enforcement this
+                    // method advertises.
+                    switch (ReadNumericDate(root, "nbf", out var notBefore))
                     {
-                        claims.NotBefore = notBefore;
-                        if (now + skew < notBefore)
-                        {
+                        case NumericDateClaim.Malformed:
                             throw new InvalidOperationException(
-                                "JWT is not yet valid: nbf is " + notBefore.ToUnixTimeSeconds()
-                                + ", now is " + now.ToUnixTimeSeconds() + ".");
-                        }
+                                "invalid JWT: \"nbf\" claim is present but not a valid NumericDate");
+                        case NumericDateClaim.Present:
+                            claims.NotBefore = notBefore;
+                            if (now + skew < notBefore)
+                            {
+                                throw new InvalidOperationException(
+                                    "JWT is not yet valid: nbf is " + notBefore.ToUnixTimeSeconds()
+                                    + ", now is " + now.ToUnixTimeSeconds() + ".");
+                            }
+                            break;
                     }
 
-                    if (TryGetNumericDate(root, "iat", out var issuedAt))
+                    // iat is informational, but apply the same rule: a present
+                    // claim that is not a valid NumericDate is malformed, not
+                    // absent.
+                    switch (ReadNumericDate(root, "iat", out var issuedAt))
                     {
-                        claims.IssuedAt = issuedAt;
+                        case NumericDateClaim.Malformed:
+                            throw new InvalidOperationException(
+                                "invalid JWT: \"iat\" claim is present but not a valid NumericDate");
+                        case NumericDateClaim.Present:
+                            claims.IssuedAt = issuedAt;
+                            break;
                     }
 
                     // exp is required: a session token with no expiry is a
-                    // permanent credential.
-                    if (!TryGetNumericDate(root, "exp", out var expiresAt))
+                    // permanent credential. Both absent and malformed fail here.
+                    if (ReadNumericDate(root, "exp", out var expiresAt) != NumericDateClaim.Present)
                     {
                         throw new InvalidOperationException(
                             "invalid JWT: missing or non-numeric \"exp\" claim");
@@ -1260,18 +1277,41 @@ namespace Turnkey
                 }
             }
 
+            /// <summary>Outcome of reading an RFC 7519 NumericDate claim.</summary>
+            private enum NumericDateClaim
+            {
+                /// <summary>The claim is not present at all.</summary>
+                Absent,
+
+                /// <summary>
+                /// The claim is present but is not an integer NumericDate within
+                /// <see cref="DateTimeOffset"/>'s range. The caller must decide
+                /// whether to reject; it must not be conflated with
+                /// <see cref="Absent"/>.
+                /// </summary>
+                Malformed,
+
+                /// <summary>The claim is present and valid.</summary>
+                Present,
+            }
+
             /// <summary>
-            /// Reads an RFC 7519 NumericDate claim. Only a JSON number is
-            /// accepted; a string-encoded timestamp is treated as absent.
+            /// Reads an RFC 7519 NumericDate claim, distinguishing an absent
+            /// claim from a present-but-malformed one. Only a JSON integer is
+            /// accepted; a string-encoded or fractional timestamp is
+            /// <see cref="NumericDateClaim.Malformed"/>, not absent.
             /// </summary>
-            private static bool TryGetNumericDate(JsonElement root, string name, out DateTimeOffset value)
+            private static NumericDateClaim ReadNumericDate(JsonElement root, string name, out DateTimeOffset value)
             {
                 value = default;
-                if (!root.TryGetProperty(name, out var element)
-                    || element.ValueKind != JsonValueKind.Number
+                if (!root.TryGetProperty(name, out var element))
+                {
+                    return NumericDateClaim.Absent;
+                }
+                if (element.ValueKind != JsonValueKind.Number
                     || !element.TryGetInt64(out long seconds))
                 {
-                    return false;
+                    return NumericDateClaim.Malformed;
                 }
                 try
                 {
@@ -1279,9 +1319,9 @@ namespace Turnkey
                 }
                 catch (ArgumentOutOfRangeException)
                 {
-                    return false;
+                    return NumericDateClaim.Malformed;
                 }
-                return true;
+                return NumericDateClaim.Present;
             }
         }
 

@@ -967,6 +967,58 @@ namespace Turnkey.Tests
             claims.IssuedAt!.Value.ToUnixTimeSeconds().Should().Be(iat);
         }
 
+        // A present-but-malformed nbf must be rejected, not silently treated as
+        // absent: otherwise a correctly signed token with a garbage not-before
+        // would bypass the enforcement Validate advertises.
+        [Theory]
+        [InlineData("\"nbf\":\"1700000000\"")]   // string, not a number
+        [InlineData("\"nbf\":1700000000.5")]     // fractional, not an integer
+        [InlineData("\"nbf\":true")]             // wrong JSON type
+        [InlineData("\"nbf\":99999999999999999")] // out of DateTimeOffset range
+        public void SessionJwtValidate_MalformedNbf_IsRejected(string nbfMember)
+        {
+            var notarizer = new TestP256Signer();
+            string jwt = notarizer.MintJwt("{" + nbfMember + ",\"exp\":" + FutureUnix() + "}");
+
+            Action act = () => Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: \"nbf\" claim is present but not a valid NumericDate");
+        }
+
+        [Fact]
+        public void SessionJwtValidate_AbsentNbf_RemainsOptional()
+        {
+            var notarizer = new TestP256Signer();
+            string jwt = notarizer.MintJwt("{\"exp\":" + FutureUnix() + "}");
+
+            var claims = Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            claims.NotBefore.Should().BeNull();
+        }
+
+        [Theory]
+        [InlineData("\"iat\":\"1700000000\"")]
+        [InlineData("\"iat\":1700000000.5")]
+        public void SessionJwtValidate_MalformedIat_IsRejected(string iatMember)
+        {
+            var notarizer = new TestP256Signer();
+            string jwt = notarizer.MintJwt("{" + iatMember + ",\"exp\":" + FutureUnix() + "}");
+
+            Action act = () => Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: \"iat\" claim is present but not a valid NumericDate");
+        }
+
+        [Fact]
+        public void SessionJwtValidate_MalformedExp_IsRejected()
+        {
+            var notarizer = new TestP256Signer();
+            string jwt = notarizer.MintJwt("{\"exp\":\"not-a-number\"}");
+
+            Action act = () => Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+            act.Should().Throw<InvalidOperationException>()
+               .WithMessage("invalid JWT: missing or non-numeric \"exp\" claim");
+        }
+
         // ============================================================
         // Audit remediation — DecryptCredentialBundle input bound
         // ============================================================

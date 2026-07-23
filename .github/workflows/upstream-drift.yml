@@ -87,6 +87,7 @@ jobs:
       # step 1-2: `npm pack` + record the tarball SHA-256) already does by
       # hand. This automates that same check periodically.
       - name: Verify npm tarball SHA-256 against package-checksums.txt
+        id: tarball
         env:
           PACKAGE: ${{ matrix.package }}
           NPM_PACKAGE: ${{ matrix.npm_package }}
@@ -121,12 +122,24 @@ jobs:
           actual_sha=$(shasum -a 256 "$tarball" | awk '{print $1}')
           rm -f "$tarball"
 
+          # A hash mismatch is DRIFT, not an infrastructure failure. Do not hard
+          # exit here: that would abort the job before the drift-report and
+          # issue-upsert steps, leaving only a failed Actions run and never the
+          # tracking issue this workflow promises. Record it as an output that
+          # the "Compute drift report" step folds into the same report/issue.
+          # Registry/transport failures above still exit non-zero, since those
+          # are not drift.
           if [[ "$actual_sha" != "$expected_sha" ]]; then
-            echo "::error::npm tarball SHA-256 mismatch for ${NPM_PACKAGE}@${NPM_VERSION}: expected ${expected_sha}, got ${actual_sha} (source: ${tarball_url})" >&2
-            exit 1
+            echo "::warning::npm tarball SHA-256 mismatch for ${NPM_PACKAGE}@${NPM_VERSION}: expected ${expected_sha}, got ${actual_sha} (source: ${tarball_url})"
+            {
+              echo "TARBALL_DRIFT=1"
+              echo "TARBALL_EXPECTED=${expected_sha}"
+              echo "TARBALL_ACTUAL=${actual_sha}"
+              echo "TARBALL_SOURCE=${tarball_url}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "npm tarball SHA-256 verified for ${NPM_PACKAGE}@${NPM_VERSION}: ${actual_sha}"
           fi
-
-          echo "npm tarball SHA-256 verified for ${NPM_PACKAGE}@${NPM_VERSION}: ${actual_sha}"
 
       # The pin file format is "<sha256>  <relpath>" where <relpath>
       # always starts with "tests/UpstreamSources/".
@@ -149,6 +162,14 @@ jobs:
           REPO: ${{ matrix.repo }}
           GIT_SHA: ${{ matrix.git_tag_sha }}
           TARBALL_DIR: ${{ matrix.tarball_dir }}
+          NPM_PACKAGE: ${{ matrix.npm_package }}
+          NPM_VERSION: ${{ matrix.npm_version }}
+          # Passed via env, never interpolated into the script body, so a
+          # registry-supplied value cannot inject shell.
+          TARBALL_DRIFT: ${{ steps.tarball.outputs.TARBALL_DRIFT }}
+          TARBALL_EXPECTED: ${{ steps.tarball.outputs.TARBALL_EXPECTED }}
+          TARBALL_ACTUAL: ${{ steps.tarball.outputs.TARBALL_ACTUAL }}
+          TARBALL_SOURCE: ${{ steps.tarball.outputs.TARBALL_SOURCE }}
         run: |
           set -euo pipefail
 
@@ -158,6 +179,20 @@ jobs:
 
           drift_count=0
           matched_count=0
+
+          # Fold a tarball-hash mismatch (recorded by the previous step) into the
+          # same report so it reaches the tracking issue rather than only a
+          # failed run. This is package-level drift, distinct from the per-file
+          # source drift computed below.
+          if [[ "${TARBALL_DRIFT:-0}" == "1" ]]; then
+            {
+              echo "- **TARBALL_DRIFT**: published npm tarball hash changed for \`${NPM_PACKAGE}@${NPM_VERSION}\`"
+              echo "  - expected sha256 \`${TARBALL_EXPECTED}\`"
+              echo "  - live sha256     \`${TARBALL_ACTUAL}\`"
+              echo "  - source          \`${TARBALL_SOURCE}\`"
+            } >> "$REPORT"
+            drift_count=$((drift_count + 1))
+          fi
 
           while IFS= read -r line; do
             # Skip comments and blank lines.
