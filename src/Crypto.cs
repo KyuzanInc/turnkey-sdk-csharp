@@ -1297,8 +1297,11 @@ namespace Turnkey
 
             /// <summary>
             /// Reads an RFC 7519 NumericDate claim, distinguishing an absent
-            /// claim from a present-but-malformed one. Only a JSON integer is
-            /// accepted; a string-encoded or fractional timestamp is
+            /// claim from a present-but-malformed one. RFC 7519 §2 defines
+            /// NumericDate as a JSON number and explicitly permits non-integer
+            /// (fractional-second) values, so any finite JSON number is accepted
+            /// with fractional precision. A non-number, a non-finite value, or a
+            /// value outside <see cref="DateTimeOffset"/>'s range is
             /// <see cref="NumericDateClaim.Malformed"/>, not absent.
             /// </summary>
             private static NumericDateClaim ReadNumericDate(JsonElement root, string name, out DateTimeOffset value)
@@ -1309,13 +1312,14 @@ namespace Turnkey
                     return NumericDateClaim.Absent;
                 }
                 if (element.ValueKind != JsonValueKind.Number
-                    || !element.TryGetInt64(out long seconds))
+                    || !element.TryGetDouble(out double seconds)
+                    || !double.IsFinite(seconds))
                 {
                     return NumericDateClaim.Malformed;
                 }
                 try
                 {
-                    value = DateTimeOffset.FromUnixTimeSeconds(seconds);
+                    value = DateTimeOffset.UnixEpoch.AddSeconds(seconds);
                 }
                 catch (ArgumentOutOfRangeException)
                 {

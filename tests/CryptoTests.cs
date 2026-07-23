@@ -969,10 +969,11 @@ namespace Turnkey.Tests
 
         // A present-but-malformed nbf must be rejected, not silently treated as
         // absent: otherwise a correctly signed token with a garbage not-before
-        // would bypass the enforcement Validate advertises.
+        // would bypass the enforcement Validate advertises. "Malformed" means
+        // not a JSON number (RFC 7519 permits fractional NumericDate values, so
+        // a fractional number is NOT malformed — see the accepted case below).
         [Theory]
         [InlineData("\"nbf\":\"1700000000\"")]   // string, not a number
-        [InlineData("\"nbf\":1700000000.5")]     // fractional, not an integer
         [InlineData("\"nbf\":true")]             // wrong JSON type
         [InlineData("\"nbf\":99999999999999999")] // out of DateTimeOffset range
         public void SessionJwtValidate_MalformedNbf_IsRejected(string nbfMember)
@@ -995,9 +996,33 @@ namespace Turnkey.Tests
             claims.NotBefore.Should().BeNull();
         }
 
+        // RFC 7519 §2 explicitly permits non-integer NumericDate values, so a
+        // fractional exp/nbf/iat is a valid claim and must be honored, not
+        // rejected. The fractional second is preserved.
+        [Fact]
+        public void SessionJwtValidate_FractionalNumericDates_AreAccepted()
+        {
+            var notarizer = new TestP256Signer();
+            long nbfWhole = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds();
+            long iatWhole = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds();
+            long expWhole = FutureUnix();
+            string jwt = notarizer.MintJwt(
+                "{\"nbf\":" + nbfWhole + ".25,\"iat\":" + iatWhole
+                + ".5,\"exp\":" + expWhole + ".75}");
+
+            var claims = Crypto.SessionJwt.Validate(jwt, null, notarizer.PublicKeyHex);
+
+            claims.NotBefore!.Value.Should().Be(
+                DateTimeOffset.UnixEpoch.AddSeconds(nbfWhole + 0.25));
+            claims.IssuedAt!.Value.Should().Be(
+                DateTimeOffset.UnixEpoch.AddSeconds(iatWhole + 0.5));
+            claims.ExpiresAt.Should().Be(
+                DateTimeOffset.UnixEpoch.AddSeconds(expWhole + 0.75));
+        }
+
         [Theory]
         [InlineData("\"iat\":\"1700000000\"")]
-        [InlineData("\"iat\":1700000000.5")]
+        [InlineData("\"iat\":false")]
         public void SessionJwtValidate_MalformedIat_IsRejected(string iatMember)
         {
             var notarizer = new TestP256Signer();
