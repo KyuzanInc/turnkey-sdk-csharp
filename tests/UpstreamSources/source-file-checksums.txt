@@ -1,3 +1,4 @@
+237d3f4f910c8ceca9bbef6fda8a27ea1f691632fe15eb395f595f230fd078ac  tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/package.json
 1c6d7518aef8453b758511447caf2836e1da0193c222acf46b332081e8ed9df8  tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/__fixtures__/api-key.private
 5a7dc076cec48cb35e40a0bb4ac6babbc932710c7d5d3e379e5277659134599f  tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/__fixtures__/api-key.public
 f53bfd3ccaec3d3d4984e5ca99c460dd877d2fa3b31466b0418ab8ed7ab9f944  tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/__fixtures__/api-key.public.pem
@@ -13,6 +14,7 @@ ca96d4ec32842d22677bd6b62b4f1b3669054de818ac6d4f0c9a38829dec8846  tests/Upstream
 4a1f2c38a12f0db96dfddec717d22140e7ac3bd8abdb03ef96a7c5d50a7aa792  tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/tink/elliptic_curves.ts
 65e38a27c549a776b5e43d5052b5c6321d6f165a9bc2f31776ba356c0203fb60  tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/utils.ts
 eb208d611768558a8463accad41c83b8b2b1b958228dfda24ac01de348e4674b  tests/UpstreamSources/turnkey-api-key-stamper-0.5.0/ts-source/webcrypto.ts
+2f68f7a62e7fcc3348ce37aa8e8e92cc1f3e8912b254a6ef8e7a78a90503e4ff  tests/UpstreamSources/turnkey-crypto-2.8.8/package.json
 de1ccbcbeb4ec17d8a990e8e4b7b77936398222a529d76ad01dd811fc27c6ed0  tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/crypto-test.ts
 2a9eb612b48c4f117954a88a691335addc6a516bba0f5d2b61cebe9735073dea  tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/__tests__/proof-tests.ts
 cafe926ae7784ff1946efa45e3aaf9f01e2a2b8f829d6cc353ef15a89044dde8  tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/constants.ts
@@ -21,6 +23,7 @@ da7ccf4629f4d709b90b01c48baa391e31349a1fc61f04ebb7c1f87cf729d12d  tests/Upstream
 80c833114deafc627ecec909722ac943a4b83a8dea01565b627206a7fa73c0a9  tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/math.ts
 e1254523968581a87fc2156531fe8adef6b081161e309820baba2ac5c56d9642  tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/proof.ts
 2f0bb0f3e86a58e8adb56f4f6e5193a9d0192e5f70980c670d57aec0f7b9da26  tests/UpstreamSources/turnkey-crypto-2.8.8/ts-source/turnkey.ts
+4c74298e2ad9a42e9b7656113f47c4f1898d2de000618e6608868c4a459de168  tests/UpstreamSources/turnkey-encoding-0.6.0/package.json
 dcbcd7b593eb2102399e835426d56c290e4c98101a5f10f91a213b8648b9f31c  tests/UpstreamSources/turnkey-encoding-0.6.0/ts-source/__tests__/index-test.ts
 4368d2973ce3697e58f282cf3d681cc486523083435d9e42baaa59f17c684aa0  tests/UpstreamSources/turnkey-encoding-0.6.0/ts-source/base64.ts
 c19ceea4c2bf89cfbfccdb60ee981f9aa9c4edb3486faeeb1c4fad9e98442962  tests/UpstreamSources/turnkey-encoding-0.6.0/ts-source/bs58.ts
@@ -28,6 +31,7 @@ c19ceea4c2bf89cfbfccdb60ee981f9aa9c4edb3486faeeb1c4fad9e98442962  tests/Upstream
 a338d310dd1c6c3be3901065bb27e3a582114af64ce919d56156d0cf6968e314  tests/UpstreamSources/turnkey-encoding-0.6.0/ts-source/encode.ts
 7d1eef8841abdd71a255c260f82b62ee4b7514c30d9a54feca7ba08f124cf751  tests/UpstreamSources/turnkey-encoding-0.6.0/ts-source/hex.ts
 c9c2541a33891abb5a4144330626a8029394de907cdeb1513982e9976c148c8d  tests/UpstreamSources/turnkey-encoding-0.6.0/ts-source/index.ts
+a2ed3b092bb6dd0b5f2b678611a06bd93a0be5c4860f60552cc5a0454f5fcfa7  tests/UpstreamSources/turnkey-http-3.16.0/package.json
 1c6d7518aef8453b758511447caf2836e1da0193c222acf46b332081e8ed9df8  tests/UpstreamSources/turnkey-http-3.16.0/ts-source/__fixtures__/api-key.private
 5a7dc076cec48cb35e40a0bb4ac6babbc932710c7d5d3e379e5277659134599f  tests/UpstreamSources/turnkey-http-3.16.0/ts-source/__fixtures__/api-key.public
 f53bfd3ccaec3d3d4984e5ca99c460dd877d2fa3b31466b0418ab8ed7ab9f944  tests/UpstreamSources/turnkey-http-3.16.0/ts-source/__fixtures__/api-key.public.pem
