@@ -208,11 +208,25 @@ jobs:
               "tests/UpstreamSources/${PACKAGE}/"*) ;;
               *) continue ;;
             esac
+
+            # Strip the local prefix to derive the in-tarball relative path.
+            local_subpath="${relpath#tests/UpstreamSources/${PACKAGE}/}"
+
+            # This Git-source loop compares retained ts-source files against the
+            # live upstream Git tree. It only handles the ts-source subtree.
+            # Other retained rows (each package's package.json) are published npm
+            # metadata: npm normalizes those bytes (adds _id/dist/gitHead, may
+            # reorder fields) relative to the Git-tree copy, so comparing them
+            # here would report permanent false DRIFT. They stay pinned for local
+            # checksum verification (source-file-checksums.txt) and are covered
+            # by the npm-tarball SHA-256 step above; skip them here.
+            case "$local_subpath" in
+              ts-source/*) ;;
+              *) continue ;;
+            esac
             matched_count=$((matched_count + 1))
 
-            # Strip the local prefix to derive the in-tarball relative path,
-            # then rewrite "ts-source" -> "src" for the live upstream layout.
-            local_subpath="${relpath#tests/UpstreamSources/${PACKAGE}/}"
+            # Rewrite "ts-source" -> "src" for the live upstream layout.
             upstream_subpath=${local_subpath/ts-source\//src/}
 
             # Read the live file via the Contents API at the pinned SHA.
